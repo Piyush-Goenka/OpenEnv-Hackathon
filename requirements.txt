@@ -1,0 +1,4 @@
+openai>=1.30.0
+openenv-core
+pydantic>=2.7.0
+uvicorn[standard]>=0.30.0
