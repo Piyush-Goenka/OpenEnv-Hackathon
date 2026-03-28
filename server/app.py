@@ -1,5 +1,5 @@
 from openenv.core.env_server import create_fastapi_app
 
-from server.environment import HackathonEnvironment
+from server.environment import DevReliabilityEnvironment
 
-app = create_fastapi_app(HackathonEnvironment)
+app = create_fastapi_app(DevReliabilityEnvironment)

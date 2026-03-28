@@ -1,0 +1,94 @@
+{
+  "scenario_id": "scenario_memleak_001",
+  "task_id": "sre_hard",
+  "title": "Diagnose a Memory Leak Under Load",
+  "description": "A worker-pool grows in memory after a deployment and is OOMKilled repeatedly.",
+  "alert": "worker-pool OOMKilled (3 occurrences, last 20 min)\nContainer memory grew from 200MB to 1.8GB over 18 minutes.",
+  "initial_log_excerpt": "[worker-pool] INFO worker boot complete\n[worker-pool] INFO job cache-warmup started\n[worker-pool] INFO job cache-warmup finished batch=5000",
+  "service_catalog": [
+    "worker-pool"
+  ],
+  "logs": {
+    "worker-pool": [
+      "[worker-pool] INFO worker boot complete",
+      "[worker-pool] INFO job cache-warmup started",
+      "[worker-pool] INFO job cache-warmup finished batch=5000",
+      "[worker-pool] INFO job cache-warmup started",
+      "[worker-pool] INFO job cache-warmup finished batch=5000"
+    ]
+  },
+  "metrics": {
+    "worker-pool": {
+      "memory_mb": {
+        "values": [
+          200,
+          450,
+          900,
+          1300,
+          1800
+        ]
+      }
+    }
+  },
+  "deployment_history": [
+    {
+      "deploy_id": "deploy-204",
+      "timestamp": "2026-04-05T14:01:00Z",
+      "summary": "add cache-warmup background job to worker-pool"
+    },
+    {
+      "deploy_id": "deploy-203",
+      "timestamp": "2026-04-04T17:12:00Z",
+      "summary": "worker-pool logging cleanup"
+    }
+  ],
+  "diffs": {
+    "deploy-204": "diff --git a/jobs/cache_warmup.py b/jobs/cache_warmup.py\n+processed_items = []\n+\n+def run_cache_warmup(items):\n+    for item in items:\n+        processed_items.append(item)\n+        warm_cache(item)\n",
+    "deploy-203": "diff --git a/worker/logging.py b/worker/logging.py\n-logger.debug(...)\n+logger.info(...)\n"
+  },
+  "heap_summaries": {
+    "2026-04-05T14:18:00Z": {
+      "top_types": [
+        {
+          "type": "ProcessedItem",
+          "count": 184220
+        },
+        {
+          "type": "dict",
+          "count": 92011
+        }
+      ],
+      "note": "ProcessedItem instances retain references from jobs.cache_warmup.processed_items"
+    }
+  },
+  "relevant_services": [
+    "worker-pool"
+  ],
+  "query_rewards": {
+    "root_cause_service": "worker-pool",
+    "correct_diff_id": "deploy-204",
+    "heap_summary_timestamp": "2026-04-05T14:18:00Z"
+  },
+  "diagnosis_fields": {
+    "source": {
+      "value": "cache-warmup job",
+      "weight": 0.2,
+      "match_mode": "contains"
+    },
+    "root_cause": {
+      "value": "processed_items retains references",
+      "weight": 0.2,
+      "match_mode": "contains"
+    },
+    "evidence": {
+      "value": "ProcessedItem instances retain references",
+      "weight": 0.2,
+      "match_mode": "contains"
+    }
+  },
+  "accepted_remediations": [
+    "clear processed_items list in job teardown",
+    "use weakref",
+    "explicitly del references after processing"
+  ]
+}

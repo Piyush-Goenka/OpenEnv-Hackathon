@@ -3,9 +3,9 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openenv-hackathon-scaffold"
-version = "0.1.0"
-description = "Industry-standard scaffold for an OpenEnv hackathon environment."
+name = "dev-reliability-env"
+version = "1.0.0"
+description = "CI debugging and SRE incident response environment for OpenEnv."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -24,7 +24,7 @@ dev = [
 py-modules = ["client", "models"]
 
 [tool.setuptools.packages.find]
-include = ["server", "tasks", "tests"]
+include = ["server", "tasks", "tasks.*", "tests"]
 
 [tool.ruff]
 line-length = 100

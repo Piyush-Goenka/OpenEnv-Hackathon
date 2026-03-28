@@ -1,0 +1,60 @@
+{
+  "scenario_id": "scenario_noisy_001",
+  "task_id": "sre_easy",
+  "title": "Identify the Noisy Service",
+  "description": "Error rate alert with obvious repeated stack traces from one backend service.",
+  "alert": "Error rate threshold exceeded (api-gateway, 5.2%)\nTimestamp: 2026-04-05T14:32:11Z",
+  "initial_log_excerpt": "[auth-service] INFO token validated user_id=8821\n[api-gateway] ERROR downstream call failed: timeout after 30s\n[payment-service] ERROR NullPointerException at PaymentProcessor.java:87\n[payment-service] ERROR NullPointerException at PaymentProcessor.java:87",
+  "service_catalog": [
+    "auth-service",
+    "api-gateway",
+    "payment-service",
+    "notification-svc"
+  ],
+  "logs": {
+    "auth-service": [
+      "[auth-service] INFO token validated user_id=8821",
+      "[auth-service] INFO token validated user_id=9034"
+    ],
+    "api-gateway": [
+      "[api-gateway] ERROR downstream call failed: timeout after 30s",
+      "[api-gateway] ERROR downstream call failed: timeout after 30s"
+    ],
+    "payment-service": [
+      "[payment-service] ERROR NullPointerException at PaymentProcessor.java:87",
+      "[payment-service] ERROR NullPointerException at PaymentProcessor.java:87",
+      "[payment-service] ERROR NullPointerException at PaymentProcessor.java:87"
+    ],
+    "notification-svc": [
+      "[notification-svc] INFO email queued for user 9034"
+    ]
+  },
+  "metrics": {},
+  "deployment_history": [],
+  "diffs": {},
+  "heap_summaries": {},
+  "relevant_services": [
+    "payment-service"
+  ],
+  "query_rewards": {
+    "root_cause_service": "payment-service"
+  },
+  "diagnosis_fields": {
+    "root_cause_service": {
+      "value": "payment-service",
+      "weight": 0.4,
+      "match_mode": "equals"
+    },
+    "error_type": {
+      "value": "NullPointerException",
+      "weight": 0.3,
+      "match_mode": "equals"
+    },
+    "affected_line": {
+      "value": "PaymentProcessor.java:87",
+      "weight": 0.3,
+      "match_mode": "contains"
+    }
+  },
+  "accepted_remediations": []
+}

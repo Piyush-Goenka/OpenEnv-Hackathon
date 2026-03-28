@@ -1,3 +1,3 @@
-from server.environment import HackathonEnvironment
+from server.environment import DevReliabilityEnvironment
 
-__all__ = ["HackathonEnvironment"]
+__all__ = ["DevReliabilityEnvironment"]

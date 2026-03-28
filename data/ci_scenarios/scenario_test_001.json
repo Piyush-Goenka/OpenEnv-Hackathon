@@ -1,0 +1,47 @@
+{
+  "scenario_id": "scenario_test_001",
+  "task_id": "ci_medium",
+  "title": "Fix the Broken Unit Test",
+  "description": "A refactor changed a list return value into a generator, breaking tests.",
+  "pr_diff": "PR Diff:\n  - def get_pending_jobs(queue):\n  -     return [job for job in queue if job.status == \"pending\"]\n  + def get_pending_jobs(queue):\n  +     return (job for job in queue if job.status == \"pending\")",
+  "initial_ci_output": "FAILED tests/test_queue.py::test_pending_count\nTypeError: object of type 'generator' has no len()\n\ntests/test_queue.py:34: in test_pending_count\n    assert len(get_pending_jobs(mock_queue)) == 3",
+  "files": {
+    "src/queue.py": "def get_pending_jobs(queue):\n    return (job for job in queue if job.status == \"pending\")\n",
+    "tests/test_queue.py": "def test_pending_count(mock_queue):\n    assert len(get_pending_jobs(mock_queue)) == 3\n"
+  },
+  "relevant_files": [
+    "src/queue.py",
+    "tests/test_queue.py"
+  ],
+  "parse_tokens_any": [
+    "return ",
+    "assert ",
+    "sum("
+  ],
+  "checks": {
+    "target_test": {
+      "failure_output": "FAILED tests/test_queue.py::test_pending_count\nTypeError: object of type 'generator' has no len()",
+      "success_output": "PASSED tests/test_queue.py::test_pending_count",
+      "required_tokens_any_of": [
+        [
+          "return [job for job in queue if job.status == \"pending\"]"
+        ],
+        [
+          "sum(1 for _ in get_pending_jobs(mock_queue)) == 3"
+        ]
+      ]
+    },
+    "regression_guard": {
+      "failure_output": "regression guard failed: pending jobs contract still unstable",
+      "success_output": "regression guard passed",
+      "required_tokens_any_of": [
+        [
+          "return [job for job in queue if job.status == \"pending\"]"
+        ],
+        [
+          "sum(1 for _ in get_pending_jobs(mock_queue)) == 3"
+        ]
+      ]
+    }
+  }
+}

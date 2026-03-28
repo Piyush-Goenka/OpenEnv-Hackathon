@@ -1,0 +1,89 @@
+{
+  "scenario_id": "scenario_latency_001",
+  "task_id": "sre_medium",
+  "title": "Trace a Latency Spike Across Services",
+  "description": "Checkout latency regressed because a slow query appeared after a migration.",
+  "alert": "checkout-api P99 latency = 8.4s (baseline: 400ms)",
+  "initial_log_excerpt": "[checkout-api] WARN request_id=7db p99 latency exceeded 8000ms\n[cart-service] INFO cart hydrated in 24ms\n[db-proxy] WARN query exceeded threshold: SELECT * FROM order_items WHERE user_id=? duration=7.9s",
+  "service_catalog": [
+    "checkout-api",
+    "cart-service",
+    "db-proxy",
+    "inventory-api",
+    "auth-service",
+    "cache-layer"
+  ],
+  "logs": {
+    "checkout-api": [
+      "[checkout-api] WARN request_id=7db p99 latency exceeded 8000ms",
+      "[checkout-api] INFO downstream=db-proxy duration=7920ms"
+    ],
+    "cart-service": [
+      "[cart-service] INFO cart hydrated in 24ms"
+    ],
+    "db-proxy": [
+      "[db-proxy] WARN query exceeded threshold: SELECT * FROM order_items WHERE user_id=? duration=7.9s",
+      "[db-proxy] WARN planner chose seq scan on order_items"
+    ],
+    "inventory-api": [
+      "[inventory-api] INFO stock lookup duration=18ms"
+    ],
+    "auth-service": [
+      "[auth-service] INFO token validated user_id=1203"
+    ],
+    "cache-layer": [
+      "[cache-layer] INFO hit ratio stable at 94%"
+    ]
+  },
+  "metrics": {
+    "checkout-api": {
+      "latency_p99_ms": {
+        "values": [
+          410,
+          430,
+          8400
+        ]
+      }
+    },
+    "db-proxy": {
+      "query_latency_p99_ms": {
+        "values": [
+          390,
+          420,
+          7900
+        ]
+      }
+    }
+  },
+  "deployment_history": [],
+  "diffs": {},
+  "heap_summaries": {},
+  "relevant_services": [
+    "checkout-api",
+    "db-proxy"
+  ],
+  "query_rewards": {
+    "root_cause_service": "db-proxy"
+  },
+  "diagnosis_fields": {
+    "root_cause_service": {
+      "value": "db-proxy",
+      "weight": 0.2,
+      "match_mode": "equals"
+    },
+    "slow_query": {
+      "value": "SELECT * FROM order_items WHERE user_id=?",
+      "weight": 0.2,
+      "match_mode": "contains"
+    },
+    "root_cause": {
+      "value": "missing index on order_items.user_id",
+      "weight": 0.3,
+      "match_mode": "contains"
+    }
+  },
+  "accepted_remediations": [
+    "add index on order_items.user_id",
+    "run analyze on order_items"
+  ]
+}

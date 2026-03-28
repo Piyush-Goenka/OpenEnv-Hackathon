@@ -1,17 +1,45 @@
-name: openenv-hackathon-scaffold
-version: "0.1.0"
-description: "Deterministic OpenEnv scaffold with placeholder tasks to be replaced by the final idea."
+name: dev-reliability-env
+version: "1.0.0"
+description: >
+  CI debugging and SRE incident response environment.
+  Agents fix failing GitHub Actions builds and diagnose
+  production incidents from logs and metrics.
+author: piyush
 tags:
   - openenv
-  - hackathon
-  - scaffold
+  - real-world
+  - software-engineering
+  - devops
+  - sre
+  - ci-cd
 tasks:
-  - id: task_easy
+  - id: ci_easy
+    track: ci
     difficulty: easy
-    description: "Starter placeholder task for exact-match grading."
-  - id: task_medium
+    description: "Fix a failing lint check in a single file"
+    max_steps: 5
+  - id: ci_medium
+    track: ci
     difficulty: medium
-    description: "Starter placeholder task for token-based partial-credit grading."
-  - id: task_hard
+    description: "Fix a broken unit test caused by a refactor"
+    max_steps: 8
+  - id: ci_hard
+    track: ci
     difficulty: hard
-    description: "Starter placeholder task for structured JSON grading."
+    description: "Fix a cascading multi-file failure from a signature change"
+    max_steps: 10
+  - id: sre_easy
+    track: sre
+    difficulty: easy
+    description: "Identify the noisy service from a log stream"
+    max_steps: 5
+  - id: sre_medium
+    track: sre
+    difficulty: medium
+    description: "Trace a latency spike across 6 services"
+    max_steps: 10
+  - id: sre_hard
+    track: sre
+    difficulty: hard
+    description: "Diagnose a memory leak from metrics, diff, and heap data"
+    max_steps: 12

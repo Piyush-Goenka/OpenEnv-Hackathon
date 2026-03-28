@@ -1,18 +1,20 @@
-# OpenEnv Hackathon Scaffold
+# DevReliability-Env
 
-This repository is structured as a clean starting point for the OpenEnv hackathon.
-It already includes the expected top-level files, a generic environment scaffold,
-placeholder tasks, Docker wiring, and basic repository hygiene.
+CI debugging and SRE incident response environment for the OpenEnv hackathon.
+The environment simulates two reliability workflows:
 
-The current implementation is intentionally domain-neutral. It is useful for
-local iteration and for locking in the repo structure, but it is not the final
-submission. The remaining work is to replace the placeholder tasks and grading
-logic with the real environment idea.
+- developers fixing failing CI
+- SREs investigating production incidents
+
+The implementation is deterministic and data-driven. CI checks are simulated
+from scenario rules instead of executing real tools, and SRE investigations
+query pre-generated logs, metrics, deployment history, and heap summaries.
 
 ## Repository Layout
 
 ```text
 .
+├── Dockerfile
 ├── client.py
 ├── inference.py
 ├── models.py
@@ -22,54 +24,69 @@ logic with the real environment idea.
 ├── server/
 │   ├── __init__.py
 │   ├── app.py
-│   ├── Dockerfile
-│   └── environment.py
+│   ├── ci_engine.py
+│   ├── environment.py
+│   ├── reward.py
+│   └── sre_engine.py
 ├── tasks/
 │   ├── __init__.py
 │   ├── base.py
 │   ├── registry.py
-│   ├── task_easy.py
-│   ├── task_medium.py
-│   └── task_hard.py
+│   ├── ci/
+│   │   ├── __init__.py
+│   │   ├── easy_lint_failure.py
+│   │   ├── medium_test_failure.py
+│   │   └── hard_cascading_failure.py
+│   └── sre/
+│       ├── __init__.py
+│       ├── easy_noisy_service.py
+│       ├── medium_latency_trace.py
+│       └── hard_memory_leak.py
+├── data/
+│   ├── ci_scenarios/
+│   └── sre_scenarios/
 ├── tests/
 │   ├── __init__.py
-│   ├── test_repo_scaffold.py
+│   ├── test_repo_layout.py
 │   └── test_task_registry.py
-├── .env.example
+├── deliverable.md
+├── guide.md
 └── Makefile
 ```
 
-## What Is Ready
+## Tasks
 
-- Hackathon-aligned file structure
-- Generic `Action`, `Observation`, and `State` models
-- A starter environment with task selection and deterministic placeholder grading
-- Root-level `inference.py` using the OpenAI client and required env vars
-- Docker entrypoint on port `7860`
-- Basic unit tests for scaffold integrity
-- `Makefile` commands for common local workflows
+### CI Track
+- `ci_easy`: fix a failing lint check in a single file
+- `ci_medium`: fix a broken unit test caused by a refactor
+- `ci_hard`: fix a cascading multi-file failure from a signature change
 
-## What Still Needs Customization
+### SRE Track
+- `sre_easy`: identify the noisy service from a log stream
+- `sre_medium`: trace a latency spike across services
+- `sre_hard`: diagnose a memory leak from metrics, diffs, and heap data
 
-- Choose the actual domain
-- Rewrite the 3 task modules with real task descriptions and graders
-- Replace placeholder reward logic with domain-specific evaluation
-- Refine the inference prompt for the chosen environment
-- Validate with the final `openenv-core` version and Hugging Face Space
+## Implementation Notes
+
+- `server/ci_engine.py` handles read-file, run-check, and patch-submission actions.
+- `server/sre_engine.py` handles log, metric, diff, heap, and deployment-history queries.
+- `server/reward.py` centralizes deterministic reward shaping.
+- `data/` contains scenario fixtures. Adding more variants does not require changing the engines.
 
 ## Quick Start
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+make run
 ```
 
-Run the server locally:
+Run tests:
 
 ```bash
-make run
+make test
 ```
 
 Run the baseline inference script:
@@ -78,21 +95,14 @@ Run the baseline inference script:
 make infer
 ```
 
-Run the lightweight tests:
-
-```bash
-make test
-```
-
-Build the Docker image:
+Build the container:
 
 ```bash
 make docker-build
 ```
 
-## Hackathon Notes
+## Current Scope
 
-- Follow the hackathon-specific rules in `guide.md`
-- Use the course materials under `openenv-course/` as implementation reference
-- Treat the final OpenEnv API installed in your environment as the source of truth
-  if the guide and course examples differ in minor details
+This repo now matches the `deliverable.md` architecture and includes starter
+scenario data for all 6 tasks. The next layer of work is to deepen the scenario
+pools and tune the graders against real baseline runs.

@@ -1,0 +1,32 @@
+{
+  "scenario_id": "scenario_lint_001",
+  "task_id": "ci_easy",
+  "title": "Fix the Linting Failure",
+  "description": "A contributor placed an import below a function definition.",
+  "pr_diff": "PR Diff:\n  + def calculate_retry_delay(attempt: int):\n  +     return 2 ** attempt\n  +\n  + import time   # wrong position, import not at top of file",
+  "initial_ci_output": "ruff check src/utils.py\nsrc/utils.py:47:1: E402 Module level import not at top of file\nFAILED",
+  "files": {
+    "src/utils.py": "def calculate_retry_delay(attempt: int):\n    return 2 ** attempt\n\nimport time\n"
+  },
+  "relevant_files": [
+    "src/utils.py"
+  ],
+  "parse_tokens_any": [
+    "import ",
+    "def ",
+    "return "
+  ],
+  "checks": {
+    "lint": {
+      "failure_output": "ruff check src/utils.py\nsrc/utils.py:47:1: E402 Module level import not at top of file\nFAILED",
+      "success_output": "ruff check src/utils.py\nAll checks passed.",
+      "required_tokens_any_of": [
+        [
+          "import time",
+          "def calculate_retry_delay",
+          "return 2 ** attempt"
+        ]
+      ]
+    }
+  }
+}

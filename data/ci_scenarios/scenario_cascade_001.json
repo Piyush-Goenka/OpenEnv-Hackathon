@@ -1,0 +1,76 @@
+{
+  "scenario_id": "scenario_cascade_001",
+  "task_id": "ci_hard",
+  "title": "Fix the Cascading Multi-File Failure",
+  "description": "A signature change propagated through call sites, tests, and integration behavior.",
+  "pr_diff": "PR Diff:\n  - def process_event(event: Event) -> Result:\n  + def process_event(event: Event, dry_run: bool = False) -> Result:\n  +     if dry_run:\n  +         return Result(success=True, changes=[])\n\nCI Log:\n  mypy src/processor.py ... FAILED\n    error: Argument missing for parameter \"dry_run\" [call-arg] (x3)\n  pytest tests/test_processor.py ... FAILED\n    TypeError: process_event() got unexpected keyword argument 'dry_run' (x2 tests)\n  pytest tests/test_integration.py ... FAILED\n    AssertionError: expected Result with changes, got empty Result",
+  "initial_ci_output": "[FAILED] mypy\nerror: Argument missing for parameter \"dry_run\" [call-arg] (x3)\n\n[FAILED] unit_tests\nTypeError: process_event() got unexpected keyword argument 'dry_run'\n\n[FAILED] integration\nAssertionError: expected Result with changes, got empty Result",
+  "files": {
+    "src/processor.py": "def process_event(event: Event, dry_run: bool = False) -> Result:\n    if dry_run:\n        return Result(success=True, changes=[])\n    return Result(success=True, changes=[\"updated\"])\n",
+    "src/consumer.py": "result = process_event(event)\n",
+    "tests/test_processor.py": "mock_process_event.side_effect = lambda event: Result(success=True, changes=[\"updated\"])\n",
+    "tests/test_integration.py": "assert result.changes == [\"updated\"]\n"
+  },
+  "relevant_files": [
+    "src/processor.py",
+    "src/consumer.py",
+    "tests/test_processor.py",
+    "tests/test_integration.py"
+  ],
+  "parse_tokens_any": [
+    "dry_run=False",
+    "assert ",
+    "return Result"
+  ],
+  "checks": {
+    "mypy": {
+      "failure_output": "mypy src/processor.py ... FAILED\nerror: Argument missing for parameter \"dry_run\" [call-arg] (x3)",
+      "success_output": "mypy src/processor.py ... PASSED",
+      "required_tokens_any_of": [
+        [
+          "process_event(event, dry_run=False)"
+        ]
+      ]
+    },
+    "unit_tests": {
+      "failure_output": "pytest tests/test_processor.py ... FAILED\nTypeError: process_event() got unexpected keyword argument 'dry_run'",
+      "success_output": "pytest tests/test_processor.py ... PASSED",
+      "required_tokens_any_of": [
+        [
+          "lambda event, dry_run=False"
+        ],
+        [
+          "def mock_process_event(event, dry_run=False)"
+        ]
+      ]
+    },
+    "integration": {
+      "failure_output": "pytest tests/test_integration.py ... FAILED\nAssertionError: expected Result with changes, got empty Result",
+      "success_output": "pytest tests/test_integration.py ... PASSED",
+      "required_tokens_any_of": [
+        [
+          "assert result.changes == [\"updated\"]"
+        ],
+        [
+          "assert result.changes != []"
+        ]
+      ]
+    },
+    "full_suite": {
+      "failure_output": "full suite still has regressions",
+      "success_output": "full suite green",
+      "required_tokens_any_of": [
+        [
+          "process_event(event, dry_run=False)",
+          "lambda event, dry_run=False",
+          "assert result.changes == [\"updated\"]"
+        ],
+        [
+          "process_event(event, dry_run=False)",
+          "def mock_process_event(event, dry_run=False)",
+          "assert result.changes == [\"updated\"]"
+        ]
+      ]
+    }
+  }
+}

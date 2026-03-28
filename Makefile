@@ -1,5 +1,5 @@
-PYTHON ?= python
-IMAGE_NAME ?= openenv-hackathon-scaffold
+PYTHON ?= python3
+IMAGE_NAME ?= dev-reliability-env
 
 .PHONY: run test compile docker-build docker-run infer validate
 
@@ -13,7 +13,7 @@ compile:
 	$(PYTHON) -m compileall client.py inference.py models.py server tasks tests
 
 docker-build:
-	docker build -f server/Dockerfile -t $(IMAGE_NAME) .
+	docker build -f Dockerfile -t $(IMAGE_NAME) .
 
 docker-run:
 	docker run --rm -p 7860:7860 $(IMAGE_NAME)
