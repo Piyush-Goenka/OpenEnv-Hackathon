@@ -1,0 +1,26 @@
+{
+  "scenario_id": "scenario_lint_002",
+  "task_id": "ci_easy",
+  "title": "Fix the Unused Variable Warning",
+  "description": "A debugging print statement was left behind, and its variable is unused after removal.",
+  "pr_diff": "PR Diff:\n  - debug_info = f\"Processing {len(items)} items\"\n  - print(debug_info)\n  + # removed debug logging\n  + debug_info = f\"Processing {len(items)} items\"",
+  "initial_ci_output": "ruff check src/config.py\nsrc/config.py:23:1: F841 Local variable 'debug_info' is assigned to but never used\nFAILED",
+  "files": {
+    "src/config.py": "import os\n\ndef load_config(path: str) -> dict:\n    data = {}\n    items = os.listdir(path)\n    debug_info = f\"Processing {len(items)} items\"\n    for item in items:\n        if item.endswith('.yaml'):\n            data[item] = True\n    return data\n"
+  },
+  "relevant_files": ["src/config.py"],
+  "parse_tokens_any": ["def ", "return ", "import "],
+  "checks": {
+    "lint": {
+      "failure_output": "ruff check src/config.py\nsrc/config.py:23:1: F841 Local variable 'debug_info' is assigned to but never used\nFAILED",
+      "success_output": "ruff check src/config.py\nAll checks passed.",
+      "required_tokens_any_of": [
+        ["def load_config", "return data", "os.listdir"]
+      ],
+      "structural_validators": [
+        {"type": "function_defined", "name": "load_config"},
+        {"type": "ruff_check", "select": "F841"}
+      ]
+    }
+  }
+}

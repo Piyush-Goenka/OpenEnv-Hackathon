@@ -1,0 +1,33 @@
+{
+  "scenario_id": "scenario_test_002",
+  "task_id": "ci_medium",
+  "title": "Fix the Broken Dict Return",
+  "description": "A refactor changed a dict return to a namedtuple, breaking .get() calls in tests.",
+  "pr_diff": "PR Diff:\n  - def get_user_profile(user_id):\n  -     return {\"name\": user.name, \"age\": user.age}\n  + from collections import namedtuple\n  + Profile = namedtuple(\"Profile\", [\"name\", \"age\"])\n  + def get_user_profile(user_id):\n  +     return Profile(name=user.name, age=user.age)",
+  "initial_ci_output": "FAILED tests/test_profile.py::test_profile_name\nAttributeError: 'Profile' object has no attribute 'get'\n\ntests/test_profile.py:12: in test_profile_name\n    assert get_user_profile(1).get(\"name\") == \"Alice\"",
+  "files": {
+    "src/profile.py": "from collections import namedtuple\n\nProfile = namedtuple(\"Profile\", [\"name\", \"age\"])\n\ndef get_user_profile(user_id):\n    return Profile(name=\"Alice\", age=30)\n",
+    "tests/test_profile.py": "from src.profile import get_user_profile\n\ndef test_profile_name():\n    assert get_user_profile(1).get(\"name\") == \"Alice\"\n"
+  },
+  "relevant_files": ["src/profile.py", "tests/test_profile.py"],
+  "parse_tokens_any": ["return ", "assert ", "def "],
+  "checks": {
+    "target_test": {
+      "failure_output": "FAILED tests/test_profile.py::test_profile_name\nAttributeError: 'Profile' object has no attribute 'get'",
+      "success_output": "PASSED tests/test_profile.py::test_profile_name",
+      "required_tokens_any_of": [
+        ["return {", "\"name\":", "\"age\":"],
+        ["._asdict()", ".get(\"name\")"],
+        [".name == \"Alice\""]
+      ]
+    },
+    "regression_guard": {
+      "failure_output": "FAILED regression: profile object must support attribute access (profile.name)",
+      "success_output": "PASSED regression guard: attribute access works",
+      "required_tokens_any_of": [
+        [".name"],
+        ["Profile("]
+      ]
+    }
+  }
+}

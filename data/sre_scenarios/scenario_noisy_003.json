@@ -1,0 +1,58 @@
+{
+  "scenario_id": "scenario_noisy_003",
+  "task_id": "sre_easy",
+  "title": "Identify the Crashing Inventory Service",
+  "description": "Inventory service is throwing IndexOutOfBounds on a batch stock update, flooding error logs.",
+  "alert": "Error rate threshold exceeded (api-gateway, 3.8%)\nTimestamp: 2026-04-07T16:45:00Z",
+  "initial_log_excerpt": "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134\n[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134\n[api-gateway] WARN downstream timeout for inventory-service\n[checkout-api] INFO checkout completed order_id=7821",
+  "service_catalog": [
+    "api-gateway",
+    "checkout-api",
+    "inventory-service",
+    "warehouse-sync"
+  ],
+  "logs": {
+    "api-gateway": [
+      "[api-gateway] WARN downstream timeout for inventory-service",
+      "[api-gateway] INFO request routed to checkout-api"
+    ],
+    "checkout-api": [
+      "[checkout-api] INFO checkout completed order_id=7821"
+    ],
+    "inventory-service": [
+      "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134",
+      "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134",
+      "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134",
+      "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134"
+    ],
+    "warehouse-sync": [
+      "[warehouse-sync] INFO sync completed for warehouse WH-03"
+    ]
+  },
+  "metrics": {},
+  "deployment_history": [],
+  "diffs": {},
+  "heap_summaries": {},
+  "relevant_services": ["inventory-service"],
+  "query_rewards": {
+    "root_cause_service": "inventory-service"
+  },
+  "diagnosis_fields": {
+    "root_cause_service": {
+      "value": "inventory-service",
+      "weight": 0.4,
+      "match_mode": "equals"
+    },
+    "error_type": {
+      "value": "IndexOutOfBoundsException",
+      "weight": 0.3,
+      "match_mode": "contains"
+    },
+    "affected_line": {
+      "value": "BatchUpdater.java:134",
+      "weight": 0.3,
+      "match_mode": "contains"
+    }
+  },
+  "accepted_remediations": []
+}

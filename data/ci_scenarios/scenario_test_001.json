@@ -27,19 +27,25 @@
           "return [job for job in queue if job.status == \"pending\"]"
         ],
         [
+          "list(get_pending_jobs"
+        ],
+        [
           "sum(1 for _ in get_pending_jobs(mock_queue)) == 3"
         ]
       ]
     },
     "regression_guard": {
-      "failure_output": "regression guard failed: pending jobs contract still unstable",
-      "success_output": "regression guard passed",
+      "failure_output": "FAILED tests/test_queue.py::test_pending_jobs_returns_iterable\nTypeError: cannot pickle 'generator' object — downstream serialization requires list return",
+      "success_output": "PASSED tests/test_queue.py::test_pending_jobs_returns_iterable\nAll regression guards green.",
       "required_tokens_any_of": [
         [
           "return [job for job in queue if job.status == \"pending\"]"
         ],
         [
-          "sum(1 for _ in get_pending_jobs(mock_queue)) == 3"
+          "return list("
+        ],
+        [
+          "list(get_pending_jobs"
         ]
       ]
     }

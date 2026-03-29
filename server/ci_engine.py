@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import ast
 import json
 import random
+import subprocess
+import tempfile
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -105,11 +109,15 @@ class CIEngine:
         file_path = str(payload.get("file", "")).strip()
         repeated_patch = patch in runtime.patches_applied if patch else False
         patch_applies = bool(patch)
-        parses = any(
-            token.lower() in patch.lower() for token in runtime.scenario.get("parse_tokens_any", [])
-        )
+
+        # Real structural validation: try to parse as Python via ast
+        parses = self._validate_parses(patch)
+
         previous_status = dict(runtime.checks_status)
+
+        # Evaluate checks with strengthened grading
         runtime.checks_status = self._evaluate_checks(runtime.scenario, patch)
+
         newly_green_checks = sum(
             1
             for check_name, is_green in runtime.checks_status.items()
@@ -157,16 +165,183 @@ class CIEngine:
             ci_output=ci_output,
         )
 
+    def _validate_parses(self, patch: str) -> bool:
+        """Validate that the patch is syntactically valid Python using ast.parse.
+
+        Falls back to token-based heuristic only if the patch is clearly
+        not a standalone Python file (e.g., a diff or multi-file patch).
+        """
+        if not patch.strip():
+            return False
+        try:
+            ast.parse(patch)
+            return True
+        except SyntaxError:
+            pass
+
+        # Fallback: if the patch contains diff-like markers, it's not meant
+        # to be standalone Python.  Accept it if it contains code-like tokens.
+        diff_markers = ("---", "+++", "@@", "diff --git")
+        if any(marker in patch for marker in diff_markers):
+            # It's a unified-diff style patch.  Check that the added lines parse.
+            added_lines = [
+                line[1:] for line in patch.splitlines()
+                if line.startswith("+") and not line.startswith("+++")
+            ]
+            if added_lines:
+                try:
+                    ast.parse("\n".join(added_lines))
+                    return True
+                except SyntaxError:
+                    return False
+        return False
+
     def _evaluate_checks(self, scenario: dict[str, Any], patch: str) -> dict[str, bool]:
-        patch_lower = patch.lower()
+        """Evaluate whether each defined check passes for the submitted patch.
+
+        Uses a layered approach:
+        1. The patch must parse as valid Python (via ast).
+        2. Token matching checks that required code constructs are present.
+        3. Optional structural validators for deeper analysis.
+        """
         results: dict[str, bool] = {}
+
+        # Gate: if the patch doesn't parse at all, no checks pass
+        if not self._validate_parses(patch):
+            for check_name in scenario["checks"]:
+                results[check_name] = False
+            return results
+
+        patch_lower = patch.lower()
+
         for check_name, check_config in scenario["checks"].items():
             results[check_name] = False
+
+            # Primary: token group matching — all tokens in at least one group must be present
             for token_group in check_config.get("required_tokens_any_of", []):
                 if all(token.lower() in patch_lower for token in token_group):
                     results[check_name] = True
                     break
+
+            # If token matching passed, apply structural validators if defined
+            if results[check_name]:
+                structural = check_config.get("structural_validators", [])
+                for validator in structural:
+                    if not self._run_structural_validator(validator, patch):
+                        results[check_name] = False
+                        break
+
         return results
+
+    def _run_structural_validator(self, validator: dict[str, Any], patch: str) -> bool:
+        """Run a named structural validator on the patch.
+
+        Validators are defined in scenario JSON under checks[name].structural_validators.
+        Supported validators:
+        - "ast_node_present": checks that a specific AST node type exists
+        - "imports_before_functions": checks E402-style import ordering
+        - "no_bare_except": checks that there are no bare except clauses
+        - "function_defined": checks that a named function exists
+        - "ruff_check": runs real ruff linter (if available)
+        """
+        vtype = validator.get("type", "")
+
+        if vtype == "ast_node_present":
+            return self._check_ast_node_present(patch, validator.get("node_type", ""))
+
+        if vtype == "imports_before_functions":
+            return self._check_imports_before_functions(patch)
+
+        if vtype == "no_bare_except":
+            return self._check_no_bare_except(patch)
+
+        if vtype == "function_defined":
+            return self._check_function_defined(patch, validator.get("name", ""))
+
+        if vtype == "ruff_check":
+            return self._run_ruff_check(patch, validator.get("select", "E,F,I"))
+
+        return True  # Unknown validator type — don't block
+
+    def _check_ast_node_present(self, patch: str, node_type: str) -> bool:
+        """Check that at least one AST node of the given type exists in the patch."""
+        try:
+            tree = ast.parse(patch)
+        except SyntaxError:
+            return False
+        for node in ast.walk(tree):
+            if type(node).__name__ == node_type:
+                return True
+        return False
+
+    def _check_imports_before_functions(self, patch: str) -> bool:
+        """Check that all module-level imports appear before function definitions."""
+        try:
+            tree = ast.parse(patch)
+        except SyntaxError:
+            return False
+        last_import_line = 0
+        first_func_line = float("inf")
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                last_import_line = max(last_import_line, node.lineno)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                first_func_line = min(first_func_line, node.lineno)
+        if last_import_line == 0:
+            return True  # No imports — nothing to check
+        return last_import_line < first_func_line
+
+    def _check_no_bare_except(self, patch: str) -> bool:
+        """Check that there are no bare `except:` clauses."""
+        try:
+            tree = ast.parse(patch)
+        except SyntaxError:
+            return False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ExceptHandler) and node.type is None:
+                return False
+        return True
+
+    def _check_function_defined(self, patch: str, name: str) -> bool:
+        """Check that a function with the given name is defined."""
+        try:
+            tree = ast.parse(patch)
+        except SyntaxError:
+            return False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name == name:
+                    return True
+        return False
+
+    def _run_ruff_check(self, patch: str, select: str = "E,F,I") -> bool:
+        """Run the ruff linter on the patch. Returns True if no violations found.
+
+        Falls back gracefully if ruff is not installed.
+        """
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=".py", mode="w", delete=False, encoding="utf-8"
+            ) as tmp:
+                tmp.write(patch)
+                tmp.flush()
+                tmp_path = tmp.name
+
+            result = subprocess.run(
+                ["ruff", "check", tmp_path, "--select", select, "--no-fix"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            # ruff not installed or timed out — fall back to passing
+            return True
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except (OSError, UnboundLocalError):
+                pass
 
     def _format_all_checks(self, scenario: dict[str, Any], checks_status: dict[str, bool]) -> str:
         blocks: list[str] = []

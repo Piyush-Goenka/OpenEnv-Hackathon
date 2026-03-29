@@ -1,0 +1,89 @@
+{
+  "scenario_id": "scenario_memleak_003",
+  "task_id": "sre_hard",
+  "title": "Diagnose a Connection Pool Exhaustion Leak",
+  "description": "A session-service leaks database connections because a new code path doesn't close connections in the error branch.",
+  "alert": "session-service OOMKilled + connection pool exhaustion\nContainer memory grew from 180MB to 1.9GB. DB connection count: 4800 (limit: 5000).",
+  "initial_log_excerpt": "[session-service] INFO service boot complete\n[session-service] INFO session refresh started for batch\n[session-service] WARN active DB connections: 4800/5000",
+  "service_catalog": ["session-service", "db-primary"],
+  "logs": {
+    "session-service": [
+      "[session-service] INFO service boot complete",
+      "[session-service] INFO session refresh started for batch",
+      "[session-service] WARN active DB connections: 4800/5000",
+      "[session-service] ERROR failed to acquire connection: pool exhausted",
+      "[session-service] WARN session refresh error branch hit — connection not returned to pool"
+    ],
+    "db-primary": [
+      "[db-primary] WARN max_connections approaching: 4800/5000",
+      "[db-primary] INFO query latency normal: p99=12ms"
+    ]
+  },
+  "metrics": {
+    "session-service": {
+      "memory_mb": {
+        "timestamps": ["10:00", "10:10", "10:20", "10:30", "10:40"],
+        "values": [180, 450, 820, 1350, 1900]
+      },
+      "active_db_connections": {
+        "timestamps": ["10:00", "10:10", "10:20", "10:30", "10:40"],
+        "values": [50, 1200, 2400, 3600, 4800]
+      }
+    }
+  },
+  "deployment_history": [
+    {
+      "deploy_id": "deploy-312",
+      "timestamp": "2026-04-07T09:55:00Z",
+      "summary": "session-service: add session refresh with retry on failure"
+    },
+    {
+      "deploy_id": "deploy-311",
+      "timestamp": "2026-04-06T22:00:00Z",
+      "summary": "db-primary: bump max_connections from 3000 to 5000"
+    }
+  ],
+  "diffs": {
+    "deploy-312": "diff --git a/session-service/refresh.py b/session-service/refresh.py\n+def refresh_session(session_id):\n+    conn = pool.acquire()\n+    try:\n+        result = conn.execute('UPDATE sessions SET ...')\n+        if result.error:\n+            log.warn('refresh failed, retrying')\n+            return refresh_session(session_id)  # recursive retry without releasing conn\n+        conn.release()\n+    except Exception:\n+        raise  # conn never released on exception path",
+    "deploy-311": "diff --git a/db-primary/postgresql.conf b/db-primary/postgresql.conf\n-max_connections = 3000\n+max_connections = 5000"
+  },
+  "heap_summaries": {
+    "2026-04-07T10:40:00Z": {
+      "top_types": [
+        {"type": "PooledConnection", "count": 4800},
+        {"type": "SessionRefreshContext", "count": 4800},
+        {"type": "dict", "count": 14400}
+      ],
+      "note": "PooledConnection instances are not being returned — recursive retry acquires new connection without releasing previous one"
+    }
+  },
+  "relevant_services": ["session-service"],
+  "query_rewards": {
+    "root_cause_service": "session-service",
+    "correct_diff_id": "deploy-312",
+    "heap_summary_timestamp": "2026-04-07T10:40:00Z"
+  },
+  "diagnosis_fields": {
+    "source": {
+      "value": "session refresh retry",
+      "weight": 0.2,
+      "match_mode": "contains"
+    },
+    "root_cause": {
+      "value": "connection not released on error or recursive retry",
+      "weight": 0.2,
+      "match_mode": "contains"
+    },
+    "evidence": {
+      "value": "PooledConnection instances not being returned",
+      "weight": 0.2,
+      "match_mode": "contains"
+    }
+  },
+  "accepted_remediations": [
+    "release connection before recursive retry",
+    "use context manager for connection",
+    "add conn.release() to finally block",
+    "replace recursion with loop and single connection"
+  ]
+}

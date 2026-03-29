@@ -2,8 +2,8 @@
   "scenario_id": "scenario_latency_001",
   "task_id": "sre_medium",
   "title": "Trace a Latency Spike Across Services",
-  "description": "Checkout latency regressed because a slow query appeared after a migration.",
-  "alert": "checkout-api P99 latency = 8.4s (baseline: 400ms)",
+  "description": "Checkout latency regressed because a slow query appeared after a migration removed an index.",
+  "alert": "checkout-api P99 latency = 8.4s (baseline: 400ms)\nTimestamp: 2026-04-05T14:32:11Z\nSeverity: CRITICAL",
   "initial_log_excerpt": "[checkout-api] WARN request_id=7db p99 latency exceeded 8000ms\n[cart-service] INFO cart hydrated in 24ms\n[db-proxy] WARN query exceeded threshold: SELECT * FROM order_items WHERE user_id=? duration=7.9s",
   "service_catalog": [
     "checkout-api",
@@ -16,74 +16,127 @@
   "logs": {
     "checkout-api": [
       "[checkout-api] WARN request_id=7db p99 latency exceeded 8000ms",
-      "[checkout-api] INFO downstream=db-proxy duration=7920ms"
+      "[checkout-api] INFO downstream=db-proxy duration=7920ms",
+      "[checkout-api] INFO downstream=cart-service duration=24ms",
+      "[checkout-api] INFO downstream=auth-service duration=11ms",
+      "[checkout-api] WARN request_id=a3f p99 latency exceeded 7500ms",
+      "[checkout-api] INFO downstream=db-proxy duration=7480ms"
     ],
     "cart-service": [
-      "[cart-service] INFO cart hydrated in 24ms"
+      "[cart-service] INFO cart hydrated in 24ms",
+      "[cart-service] INFO cache hit for user_id=1203"
     ],
     "db-proxy": [
       "[db-proxy] WARN query exceeded threshold: SELECT * FROM order_items WHERE user_id=? duration=7.9s",
-      "[db-proxy] WARN planner chose seq scan on order_items"
+      "[db-proxy] WARN planner chose seq scan on order_items (index on user_id was dropped in migration 042)",
+      "[db-proxy] INFO query below threshold: SELECT * FROM products WHERE id IN (?) duration=12ms",
+      "[db-proxy] WARN query exceeded threshold: SELECT * FROM order_items WHERE user_id=? duration=7.5s"
     ],
     "inventory-api": [
-      "[inventory-api] INFO stock lookup duration=18ms"
+      "[inventory-api] INFO stock lookup duration=18ms",
+      "[inventory-api] INFO batch restock processed 200 items in 320ms"
     ],
     "auth-service": [
-      "[auth-service] INFO token validated user_id=1203"
+      "[auth-service] INFO token validated user_id=1203",
+      "[auth-service] WARN rate limit approaching for IP 10.0.3.42 (980/1000 in window)",
+      "[auth-service] INFO token validated user_id=8821"
     ],
     "cache-layer": [
-      "[cache-layer] INFO hit ratio stable at 94%"
+      "[cache-layer] INFO hit ratio stable at 94%",
+      "[cache-layer] INFO eviction count normal: 14/min",
+      "[cache-layer] WARN brief connection pool spike: 48/50 active"
     ]
   },
   "metrics": {
     "checkout-api": {
       "latency_p99_ms": {
-        "values": [
-          410,
-          430,
-          8400
-        ]
+        "timestamps": ["14:00", "14:10", "14:20", "14:30"],
+        "values": [410, 430, 420, 8400]
+      },
+      "request_count": {
+        "timestamps": ["14:00", "14:10", "14:20", "14:30"],
+        "values": [1200, 1180, 1210, 1195]
+      },
+      "error_rate_pct": {
+        "timestamps": ["14:00", "14:10", "14:20", "14:30"],
+        "values": [0.1, 0.1, 0.2, 0.8]
       }
     },
     "db-proxy": {
       "query_latency_p99_ms": {
-        "values": [
-          390,
-          420,
-          7900
-        ]
+        "timestamps": ["14:00", "14:10", "14:20", "14:30"],
+        "values": [390, 420, 400, 7900]
+      },
+      "active_connections": {
+        "timestamps": ["14:00", "14:10", "14:20", "14:30"],
+        "values": [30, 32, 31, 45]
+      }
+    },
+    "cache-layer": {
+      "hit_ratio_pct": {
+        "timestamps": ["14:00", "14:10", "14:20", "14:30"],
+        "values": [94.1, 93.8, 94.2, 94.0]
+      }
+    },
+    "auth-service": {
+      "latency_p99_ms": {
+        "timestamps": ["14:00", "14:10", "14:20", "14:30"],
+        "values": [11, 12, 11, 13]
       }
     }
   },
-  "deployment_history": [],
-  "diffs": {},
+  "deployment_history": [
+    {
+      "deploy_id": "deploy-042",
+      "timestamp": "2026-04-05T13:55:00Z",
+      "summary": "schema migration: drop unused indexes on order_items for storage reclaim"
+    },
+    {
+      "deploy_id": "deploy-041",
+      "timestamp": "2026-04-04T16:30:00Z",
+      "summary": "cart-service: bump cache TTL from 5m to 15m"
+    }
+  ],
+  "diffs": {
+    "deploy-042": "diff --git a/migrations/042_drop_indexes.sql b/migrations/042_drop_indexes.sql\n+DROP INDEX IF EXISTS idx_order_items_user_id;\n+-- reclaim ~2GB storage from unused index\n+VACUUM ANALYZE order_items;",
+    "deploy-041": "diff --git a/cart-service/config.yaml b/cart-service/config.yaml\n-cache_ttl: 300\n+cache_ttl: 900"
+  },
   "heap_summaries": {},
   "relevant_services": [
     "checkout-api",
     "db-proxy"
   ],
   "query_rewards": {
-    "root_cause_service": "db-proxy"
+    "root_cause_service": "db-proxy",
+    "correct_diff_id": "deploy-042"
   },
   "diagnosis_fields": {
     "root_cause_service": {
       "value": "db-proxy",
-      "weight": 0.2,
+      "weight": 0.15,
       "match_mode": "equals"
     },
     "slow_query": {
       "value": "SELECT * FROM order_items WHERE user_id=?",
-      "weight": 0.2,
+      "weight": 0.15,
       "match_mode": "contains"
     },
     "root_cause": {
-      "value": "missing index on order_items.user_id",
-      "weight": 0.3,
+      "value": "index on order_items.user_id was dropped",
+      "weight": 0.25,
+      "match_mode": "contains"
+    },
+    "trigger_event": {
+      "value": "deploy-042",
+      "weight": 0.15,
       "match_mode": "contains"
     }
   },
   "accepted_remediations": [
+    "recreate index on order_items.user_id",
+    "CREATE INDEX idx_order_items_user_id ON order_items(user_id)",
     "add index on order_items.user_id",
-    "run analyze on order_items"
+    "revert migration 042",
+    "rollback deploy-042"
   ]
 }
