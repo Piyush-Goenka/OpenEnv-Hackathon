@@ -1,0 +1,58 @@
+{
+  "scenario_id": "scenario_noisy_002",
+  "task_id": "sre_easy",
+  "title": "Identify the Failing Auth Service",
+  "description": "Auth service is throwing repeated ConnectionRefused errors to Redis, causing login failures.",
+  "alert": "Error rate threshold exceeded (auth-service, 12.3%)\nTimestamp: 2026-04-06T09:14:00Z",
+  "initial_log_excerpt": "[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379\n[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379\n[api-gateway] INFO request routed to checkout-api\n[payment-service] INFO payment processed order_id=4492",
+  "service_catalog": [
+    "auth-service",
+    "api-gateway",
+    "payment-service",
+    "redis-cache"
+  ],
+  "logs": {
+    "auth-service": [
+      "[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379",
+      "[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379",
+      "[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379",
+      "[auth-service] WARN session cache unavailable, falling back to DB"
+    ],
+    "api-gateway": [
+      "[api-gateway] INFO request routed to checkout-api",
+      "[api-gateway] INFO request routed to auth-service"
+    ],
+    "payment-service": [
+      "[payment-service] INFO payment processed order_id=4492"
+    ],
+    "redis-cache": [
+      "[redis-cache] FATAL bind: address already in use, shutting down"
+    ]
+  },
+  "metrics": {},
+  "deployment_history": [],
+  "diffs": {},
+  "heap_summaries": {},
+  "relevant_services": ["auth-service"],
+  "query_rewards": {
+    "root_cause_service": "auth-service"
+  },
+  "diagnosis_fields": {
+    "root_cause_service": {
+      "value": "auth-service",
+      "weight": 0.4,
+      "match_mode": "equals"
+    },
+    "error_type": {
+      "value": "ConnectionRefusedException",
+      "weight": 0.3,
+      "match_mode": "contains"
+    },
+    "affected_dependency": {
+      "value": "redis-cache",
+      "weight": 0.3,
+      "match_mode": "contains"
+    }
+  },
+  "accepted_remediations": []
+}

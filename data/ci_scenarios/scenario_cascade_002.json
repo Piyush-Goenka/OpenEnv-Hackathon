@@ -1,0 +1,51 @@
+{
+  "scenario_id": "scenario_cascade_002",
+  "task_id": "ci_hard",
+  "title": "Fix the Cascading Return Type Change",
+  "description": "A function's return type changed from dict to a dataclass, breaking consumers.",
+  "pr_diff": "PR Diff:\n  - def fetch_config() -> dict:\n  -     return {\"host\": \"db.local\", \"port\": 5432}\n  + @dataclass\n  + class Config:\n  +     host: str\n  +     port: int\n  + def fetch_config() -> Config:\n  +     return Config(host=\"db.local\", port=5432)",
+  "initial_ci_output": "[FAILED] mypy\nerror: Item \"Config\" of ... has no attribute \"__getitem__\" [index-error] (x4)\n\n[FAILED] unit_tests\nTypeError: 'Config' object is not subscriptable\n\n[FAILED] integration\nKeyError: config['host'] no longer valid",
+  "files": {
+    "src/config_loader.py": "from dataclasses import dataclass\n\n@dataclass\nclass Config:\n    host: str\n    port: int\n\ndef fetch_config() -> Config:\n    return Config(host=\"db.local\", port=5432)\n",
+    "src/database.py": "config = fetch_config()\nconn = connect(config[\"host\"], config[\"port\"])\n",
+    "src/server.py": "config = fetch_config()\nprint(f\"Listening on {config['host']}:{config['port']}\")\n",
+    "tests/test_config.py": "def test_config_host():\n    config = fetch_config()\n    assert config[\"host\"] == \"db.local\"\n",
+    "tests/test_integration.py": "config = fetch_config()\nassert config[\"host\"] == \"db.local\" and config[\"port\"] == 5432\n"
+  },
+  "relevant_files": [
+    "src/config_loader.py", "src/database.py", "src/server.py",
+    "tests/test_config.py", "tests/test_integration.py"
+  ],
+  "parse_tokens_any": ["config.host", "config.port", "Config("],
+  "checks": {
+    "mypy": {
+      "failure_output": "mypy: 'Config' object is not subscriptable [index-error] (x4)",
+      "success_output": "mypy: all clear",
+      "required_tokens_any_of": [
+        ["config.host", "config.port"]
+      ]
+    },
+    "unit_tests": {
+      "failure_output": "TypeError: 'Config' object is not subscriptable in test_config_host",
+      "success_output": "PASSED tests/test_config.py::test_config_host",
+      "required_tokens_any_of": [
+        ["config.host == \"db.local\""],
+        ["assert config.host"]
+      ]
+    },
+    "integration": {
+      "failure_output": "KeyError: 'Config' object does not support [] access in integration test",
+      "success_output": "PASSED integration tests",
+      "required_tokens_any_of": [
+        ["config.host", "config.port"]
+      ]
+    },
+    "full_suite": {
+      "failure_output": "full suite still has failures from dict→dataclass migration",
+      "success_output": "full suite green",
+      "required_tokens_any_of": [
+        ["config.host", "config.port", "assert config.host"]
+      ]
+    }
+  }
+}

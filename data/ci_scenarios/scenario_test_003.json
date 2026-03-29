@@ -1,0 +1,34 @@
+{
+  "scenario_id": "scenario_test_003",
+  "task_id": "ci_medium",
+  "title": "Fix the Async Await Mismatch",
+  "description": "A sync function was converted to async but tests don't await the call.",
+  "pr_diff": "PR Diff:\n  - def fetch_data(url):\n  -     return requests.get(url).json()\n  + async def fetch_data(url):\n  +     async with aiohttp.ClientSession() as s:\n  +         async with s.get(url) as r:\n  +             return await r.json()",
+  "initial_ci_output": "FAILED tests/test_fetch.py::test_fetch_returns_data\nTypeError: object dict can't be used in 'await' expression\nassert fetch_data(\"http://api/data\") == {\"ok\": True}",
+  "files": {
+    "src/fetcher.py": "import aiohttp\n\nasync def fetch_data(url):\n    async with aiohttp.ClientSession() as s:\n        async with s.get(url) as r:\n            return await r.json()\n",
+    "tests/test_fetch.py": "from src.fetcher import fetch_data\n\ndef test_fetch_returns_data():\n    assert fetch_data(\"http://api/data\") == {\"ok\": True}\n"
+  },
+  "relevant_files": ["src/fetcher.py", "tests/test_fetch.py"],
+  "parse_tokens_any": ["return ", "assert ", "async "],
+  "checks": {
+    "target_test": {
+      "failure_output": "FAILED tests/test_fetch.py::test_fetch_returns_data\nTypeError: object coroutine can't be compared directly",
+      "success_output": "PASSED tests/test_fetch.py::test_fetch_returns_data",
+      "required_tokens_any_of": [
+        ["def fetch_data", "return requests.get"],
+        ["await fetch_data", "async def test_"],
+        ["asyncio.run(fetch_data"]
+      ]
+    },
+    "regression_guard": {
+      "failure_output": "FAILED regression: fetch_data must return parsed JSON data, not a coroutine",
+      "success_output": "PASSED regression guard: return type is correct",
+      "required_tokens_any_of": [
+        ["return requests.get", ".json()"],
+        ["await", "fetch_data"],
+        ["asyncio.run(fetch_data"]
+      ]
+    }
+  }
+}

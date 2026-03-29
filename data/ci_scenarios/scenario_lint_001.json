@@ -26,6 +26,11 @@
           "def calculate_retry_delay",
           "return 2 ** attempt"
         ]
+      ],
+      "structural_validators": [
+        {"type": "imports_before_functions"},
+        {"type": "function_defined", "name": "calculate_retry_delay"},
+        {"type": "ruff_check", "select": "E4,F"}
       ]
     }
   }
