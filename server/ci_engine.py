@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from server.reward import ci_step_reward
+from server.reward import ci_step_reward, CIRewardConfig
 from tasks.base import TaskDefinition
 
 
@@ -127,6 +127,9 @@ class CIEngine:
             previous_status.get(check_name, False) and not is_green
             for check_name, is_green in runtime.checks_status.items()
         )
+        scenario_config = runtime.scenario.get("reward_config", {})
+        config_obj = CIRewardConfig(**scenario_config) if scenario_config else CIRewardConfig()
+
         all_green = all(runtime.checks_status.values()) if runtime.checks_status else False
         reward, notes = ci_step_reward(
             patch_applies=patch_applies,
@@ -136,6 +139,7 @@ class CIEngine:
             repeated_patch=repeated_patch,
             broke_green_checks=broke_green_checks,
             step_count=step_count,
+            config=config_obj,
         )
 
         if patch:
