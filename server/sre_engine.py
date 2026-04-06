@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from server.reward import sre_diagnosis_reward, sre_query_reward, sre_remediation_reward
+from server.reward import sre_diagnosis_reward, sre_query_reward, sre_remediation_reward, SRERewardConfig
 from tasks.base import TaskDefinition
 
 
@@ -42,7 +42,6 @@ class SREEngine:
         payload: dict[str, Any],
         step_count: int,
     ) -> SREEngineResult:
-        del step_count
         if action_type in {
             "get_logs",
             "get_metrics",
@@ -50,11 +49,11 @@ class SREEngine:
             "get_heap_summary",
             "get_deployment_history",
         }:
-            return self._handle_query(runtime, action_type, payload)
+            return self._handle_query(runtime, action_type, payload, step_count)
         if action_type == "submit_diagnosis":
-            return self._submit_diagnosis(runtime, payload)
+            return self._submit_diagnosis(runtime, payload, step_count)
         if action_type == "submit_remediation":
-            return self._submit_remediation(runtime, payload)
+            return self._submit_remediation(runtime, payload, step_count)
         return SREEngineResult(
             reward=0.0,
             feedback=f"Unsupported SRE action_type={action_type!r}.",
@@ -66,6 +65,7 @@ class SREEngine:
         runtime: SREEpisodeRuntime,
         action_type: str,
         payload: dict[str, Any],
+        step_count: int,
     ) -> SREEngineResult:
         fingerprint = json.dumps({"action_type": action_type, "payload": payload}, sort_keys=True)
         repeated_query = fingerprint in runtime.queries_made
@@ -106,6 +106,9 @@ class SREEngine:
         else:
             tool_results = self._format_deployment_history(runtime.scenario)
 
+        scenario_config = runtime.scenario.get("reward_config", {})
+        config_obj = SRERewardConfig(**scenario_config) if scenario_config else SRERewardConfig()
+
         reward, notes = sre_query_reward(
             repeated_query=repeated_query,
             new_relevant_service=new_relevant_service,
@@ -113,6 +116,8 @@ class SREEngine:
             queried_deployment_history=queried_deployment_history,
             queried_correct_diff=queried_correct_diff,
             queried_heap_summary=queried_heap_summary,
+            step_count=step_count,
+            config=config_obj,
         )
         runtime.last_tool_results = tool_results
         feedback = "Investigation data returned."
@@ -130,6 +135,7 @@ class SREEngine:
         self,
         runtime: SREEpisodeRuntime,
         payload: dict[str, Any],
+        step_count: int,
     ) -> SREEngineResult:
         runtime.diagnosis_submitted = True
         field_results: list[tuple[str, bool, float]] = []
@@ -142,7 +148,10 @@ class SREEngine:
             matched = expected == submitted if match_mode == "equals" else expected in submitted
             field_results.append((field_name, matched, float(config["weight"])))
 
-        reward, notes = sre_diagnosis_reward(field_results)
+        scenario_config = runtime.scenario.get("reward_config", {})
+        config_obj = SRERewardConfig(**scenario_config) if scenario_config else SRERewardConfig()
+
+        reward, notes = sre_diagnosis_reward(field_results, step_count, config_obj)
         runtime.diagnosis_correct = all(match for _, match, _ in field_results) and bool(field_results)
         feedback = "Diagnosis submitted."
         if notes:
@@ -158,6 +167,7 @@ class SREEngine:
         self,
         runtime: SREEpisodeRuntime,
         payload: dict[str, Any],
+        step_count: int,
     ) -> SREEngineResult:
         runtime.remediation_submitted = True
         submitted = " ".join(str(value) for value in payload.values()).strip().lower()
@@ -166,7 +176,10 @@ class SREEngine:
             for remediation in runtime.scenario.get("accepted_remediations", [])
         ]
         runtime.remediation_correct = any(candidate in submitted for candidate in accepted)
-        reward, notes = sre_remediation_reward(runtime.remediation_correct)
+        scenario_config = runtime.scenario.get("reward_config", {})
+        config_obj = SRERewardConfig(**scenario_config) if scenario_config else SRERewardConfig()
+
+        reward, notes = sre_remediation_reward(runtime.remediation_correct, step_count, config_obj)
         feedback = "Remediation submitted."
         if notes:
             feedback = f"{feedback} {'; '.join(notes)}."

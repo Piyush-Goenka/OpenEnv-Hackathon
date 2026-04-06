@@ -1,17 +1,44 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterable
+
+
+@dataclass
+class CIRewardConfig:
+    patch_applied: float = 0.10
+    parses: float = 0.10
+    newly_green_check: float = 0.20
+    all_green_base: float = 0.40
+    repeated_patch_penalty: float = 0.10
+    broke_green_check_penalty: float = 0.15
+    efficiency_bonus_step1: float = 0.10
+    efficiency_bonus_step2: float = 0.05
+    step_decay_factor: float = 0.95
+
+
+@dataclass
+class SRERewardConfig:
+    new_relevant_service: float = 0.05
+    queried_root_cause: float = 0.15
+    queried_deployment_history: float = 0.10
+    queried_correct_diff: float = 0.10
+    queried_heap_summary: float = 0.20
+    repeated_query_penalty: float = 0.05
+    wrong_diagnosis_penalty: float = 0.10
+    correct_remediation: float = 0.35
+    step_decay_factor: float = 0.95
 
 
 def clamp_score(value: float) -> float:
     return round(max(0.0, min(1.0, value)), 3)
 
 
-def ci_efficiency_bonus(step_count: int) -> float:
+def ci_efficiency_bonus(step_count: int, config: CIRewardConfig) -> float:
     if step_count <= 1:
-        return 0.10
+        return config.efficiency_bonus_step1
     if step_count == 2:
-        return 0.05
+        return config.efficiency_bonus_step2
     return 0.0
 
 
@@ -24,30 +51,35 @@ def ci_step_reward(
     repeated_patch: bool,
     broke_green_checks: bool,
     step_count: int,
+    config: CIRewardConfig | None = None,
 ) -> tuple[float, list[str]]:
+    if config is None:
+        config = CIRewardConfig()
+
     reward = 0.0
     notes: list[str] = []
 
     if patch_applies:
-        reward += 0.10
+        reward += config.patch_applied
         notes.append("patch applied cleanly")
     if parses:
-        reward += 0.10
+        reward += config.parses
         notes.append("code still parses structurally")
     if newly_green_checks:
-        reward += 0.20 * newly_green_checks
+        reward += config.newly_green_check * newly_green_checks
         notes.append(f"{newly_green_checks} new check(s) went green")
     if all_green:
-        reward += 0.40 + ci_efficiency_bonus(step_count)
+        reward += config.all_green_base + ci_efficiency_bonus(step_count, config)
         notes.append("all checks green")
     if repeated_patch:
-        reward -= 0.10
+        reward -= config.repeated_patch_penalty
         notes.append("repeated identical patch penalty")
     if broke_green_checks:
-        reward -= 0.15
+        reward -= config.broke_green_check_penalty
         notes.append("patch regressed a previously green check")
 
-    return clamp_score(reward), notes
+    decayed_reward = reward * (config.step_decay_factor ** step_count)
+    return clamp_score(decayed_reward), notes
 
 
 def sre_query_reward(
@@ -58,33 +90,46 @@ def sre_query_reward(
     queried_deployment_history: bool,
     queried_correct_diff: bool,
     queried_heap_summary: bool,
+    step_count: int,
+    config: SRERewardConfig | None = None,
 ) -> tuple[float, list[str]]:
+    if config is None:
+        config = SRERewardConfig()
+
     reward = 0.0
     notes: list[str] = []
 
     if new_relevant_service:
-        reward += 0.05
+        reward += config.new_relevant_service
         notes.append("queried a new relevant service")
     if queried_root_cause_service:
-        reward += 0.15
+        reward += config.queried_root_cause
         notes.append("queried the root-cause service")
     if queried_deployment_history:
-        reward += 0.10
+        reward += config.queried_deployment_history
         notes.append("checked deployment history")
     if queried_correct_diff:
-        reward += 0.10
+        reward += config.queried_correct_diff
         notes.append("inspected the most relevant diff")
     if queried_heap_summary:
-        reward += 0.20
+        reward += config.queried_heap_summary
         notes.append("confirmed heap growth evidence")
     if repeated_query:
-        reward -= 0.05
+        reward -= config.repeated_query_penalty
         notes.append("repeated identical query penalty")
 
-    return clamp_score(reward), notes
+    decayed_reward = reward * (config.step_decay_factor ** step_count)
+    return clamp_score(decayed_reward), notes
 
 
-def sre_diagnosis_reward(field_results: Iterable[tuple[str, bool, float]]) -> tuple[float, list[str]]:
+def sre_diagnosis_reward(
+    field_results: Iterable[tuple[str, bool, float]],
+    step_count: int,
+    config: SRERewardConfig | None = None,
+) -> tuple[float, list[str]]:
+    if config is None:
+        config = SRERewardConfig()
+
     reward = 0.0
     notes: list[str] = []
     matched_any = False
@@ -96,13 +141,23 @@ def sre_diagnosis_reward(field_results: Iterable[tuple[str, bool, float]]) -> tu
             notes.append(f"correct {field_name}")
 
     if not matched_any:
-        reward -= 0.10
+        reward -= config.wrong_diagnosis_penalty
         notes.append("wrong diagnosis penalty")
 
-    return clamp_score(reward), notes
+    decayed_reward = reward * (config.step_decay_factor ** step_count)
+    return clamp_score(decayed_reward), notes
 
 
-def sre_remediation_reward(correct: bool) -> tuple[float, list[str]]:
+def sre_remediation_reward(
+    correct: bool,
+    step_count: int,
+    config: SRERewardConfig | None = None,
+) -> tuple[float, list[str]]:
+    if config is None:
+        config = SRERewardConfig()
+
     if correct:
-        return 0.35, ["correct remediation submitted"]
+        decayed_reward = config.correct_remediation * (config.step_decay_factor ** step_count)
+        return clamp_score(decayed_reward), ["correct remediation submitted"]
+
     return 0.0, ["remediation did not match an accepted fix"]
