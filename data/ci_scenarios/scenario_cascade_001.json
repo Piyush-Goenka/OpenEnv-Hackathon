@@ -2,74 +2,66 @@
   "scenario_id": "scenario_cascade_001",
   "task_id": "ci_hard",
   "title": "Fix the Cascading Multi-File Failure",
-  "description": "A signature change propagated through call sites, tests, and integration behavior.",
-  "pr_diff": "PR Diff:\n  - def process_event(event: Event) -> Result:\n  + def process_event(event: Event, dry_run: bool = False) -> Result:\n  +     if dry_run:\n  +         return Result(success=True, changes=[])\n\nCI Log:\n  mypy src/processor.py ... FAILED\n    error: Argument missing for parameter \"dry_run\" [call-arg] (x3)\n  pytest tests/test_processor.py ... FAILED\n    TypeError: process_event() got unexpected keyword argument 'dry_run' (x2 tests)\n  pytest tests/test_integration.py ... FAILED\n    AssertionError: expected Result with changes, got empty Result",
-  "initial_ci_output": "[FAILED] mypy\nerror: Argument missing for parameter \"dry_run\" [call-arg] (x3)\n\n[FAILED] unit_tests\nTypeError: process_event() got unexpected keyword argument 'dry_run'\n\n[FAILED] integration\nAssertionError: expected Result with changes, got empty Result",
+  "description": "A signature change added a dry_run parameter, breaking call sites, mocks, and integration assertions across 4 files.",
+  "pr_diff": "PR Diff:\n  - def process_event(event: Event) -> Result:\n  + def process_event(event: Event, dry_run: bool = False) -> Result:\n  +     if dry_run:\n  +         return Result(success=True, changes=[])\n\nCI Log:\n  mypy src/processor.py ... FAILED\n    error: Argument missing for parameter \"dry_run\" [call-arg] (x3)\n  pytest tests/test_processor.py ... FAILED\n    TypeError: process_event() mock doesn't match new signature\n  pytest tests/test_integration.py ... FAILED\n    AssertionError: expected Result with changes, got empty Result",
+  "initial_ci_output": "[FAILED] mypy\nerror: Argument missing for parameter \"dry_run\" [call-arg] (x3)\n\n[FAILED] unit_tests\nTypeError: process_event() mock doesn't match new signature\n\n[FAILED] integration\nAssertionError: expected Result with changes, got empty Result\n\n[FAILED] full_suite\nMultiple cascading failures across 4 files",
   "files": {
-    "src/processor.py": "def process_event(event: Event, dry_run: bool = False) -> Result:\n    if dry_run:\n        return Result(success=True, changes=[])\n    return Result(success=True, changes=[\"updated\"])\n",
-    "src/consumer.py": "result = process_event(event)\n",
-    "tests/test_processor.py": "mock_process_event.side_effect = lambda event: Result(success=True, changes=[\"updated\"])\n",
-    "tests/test_integration.py": "assert result.changes == [\"updated\"]\n"
+    "src/processor.py": "from dataclasses import dataclass, field\nfrom typing import Any\n\n\n@dataclass\nclass Event:\n    event_type: str\n    payload: dict[str, Any]\n\n\n@dataclass\nclass Result:\n    success: bool\n    changes: list[str] = field(default_factory=list)\n\n\ndef process_event(event: Event, dry_run: bool = False) -> Result:\n    \"\"\"Process an event, optionally in dry-run mode.\"\"\"\n    if dry_run:\n        return Result(success=True, changes=[])\n    return Result(success=True, changes=[\"updated\"])\n\n\ndef batch_process(events: list[Event]) -> list[Result]:\n    return [process_event(e) for e in events]\n",
+    "src/consumer.py": "from src.processor import Event, process_event\n\n\ndef handle_incoming(raw_data: dict) -> None:\n    event = Event(event_type=raw_data[\"type\"], payload=raw_data)\n    result = process_event(event)\n    if not result.success:\n        raise RuntimeError(f\"Processing failed for {raw_data['type']}\")\n",
+    "tests/test_processor.py": "from unittest.mock import MagicMock\nfrom src.processor import Event, Result, process_event\n\n\ndef test_process_event_returns_result():\n    event = Event(event_type=\"click\", payload={\"page\": \"home\"})\n    result = process_event(event)\n    assert result.success is True\n\n\ndef test_process_event_mock():\n    mock_process_event = MagicMock()\n    mock_process_event.side_effect = lambda event: Result(success=True, changes=[\"updated\"])\n    result = mock_process_event(Event(event_type=\"click\", payload={}))\n    assert result.changes == [\"updated\"]\n",
+    "tests/test_integration.py": "from src.processor import Event, process_event\n\n\ndef test_integration_changes_applied():\n    event = Event(event_type=\"deploy\", payload={\"version\": \"2.1\"})\n    result = process_event(event)\n    assert result.changes == [\"updated\"]\n    assert result.success is True\n"
   },
   "relevant_files": [
-    "src/processor.py",
-    "src/consumer.py",
-    "tests/test_processor.py",
-    "tests/test_integration.py"
+    "src/processor.py", "src/consumer.py",
+    "tests/test_processor.py", "tests/test_integration.py"
   ],
-  "parse_tokens_any": [
-    "dry_run=False",
-    "assert ",
-    "return Result"
-  ],
+  "parse_tokens_any": ["dry_run", "assert ", "return Result"],
   "checks": {
     "mypy": {
       "failure_output": "mypy src/processor.py ... FAILED\nerror: Argument missing for parameter \"dry_run\" [call-arg] (x3)",
       "success_output": "mypy src/processor.py ... PASSED",
       "required_tokens_any_of": [
-        [
-          "process_event(event, dry_run=False)"
-        ]
+        ["process_event(event, dry_run=False)"],
+        ["process_event(event)", "dry_run: bool = False"],
+        ["dry_run=False"]
+      ],
+      "structural_validators": [
+        {"type": "function_defined", "name": "process_event"}
       ]
     },
     "unit_tests": {
-      "failure_output": "pytest tests/test_processor.py ... FAILED\nTypeError: process_event() got unexpected keyword argument 'dry_run'",
+      "failure_output": "pytest tests/test_processor.py ... FAILED\nTypeError: process_event() mock doesn't match new signature",
       "success_output": "pytest tests/test_processor.py ... PASSED",
       "required_tokens_any_of": [
-        [
-          "lambda event, dry_run=False"
-        ],
-        [
-          "def mock_process_event(event, dry_run=False)"
-        ]
+        ["lambda event, dry_run=False"],
+        ["def mock_process_event(event, dry_run=False)"],
+        ["lambda event, **kwargs"]
+      ],
+      "structural_validators": [
+        {"type": "no_bare_except"}
       ]
     },
     "integration": {
       "failure_output": "pytest tests/test_integration.py ... FAILED\nAssertionError: expected Result with changes, got empty Result",
       "success_output": "pytest tests/test_integration.py ... PASSED",
       "required_tokens_any_of": [
-        [
-          "assert result.changes == [\"updated\"]"
-        ],
-        [
-          "assert result.changes != []"
-        ]
-      ]
+        ["assert result.changes == [\"updated\"]"],
+        ["assert result.changes != []"],
+        ["assert len(result.changes) > 0"]
+      ],
+      "structural_validators": []
     },
     "full_suite": {
-      "failure_output": "full suite still has regressions",
-      "success_output": "full suite green",
+      "failure_output": "full suite still has regressions across processor, consumer, and test files",
+      "success_output": "full suite green — all call sites updated",
       "required_tokens_any_of": [
-        [
-          "process_event(event, dry_run=False)",
-          "lambda event, dry_run=False",
-          "assert result.changes == [\"updated\"]"
-        ],
-        [
-          "process_event(event, dry_run=False)",
-          "def mock_process_event(event, dry_run=False)",
-          "assert result.changes == [\"updated\"]"
-        ]
+        ["process_event(event, dry_run=False)", "lambda event, dry_run=False", "assert result.changes"],
+        ["process_event(event, dry_run=False)", "def mock_process_event(event, dry_run=False)", "assert result.changes"],
+        ["dry_run: bool = False", "lambda event, **kwargs", "assert result.changes"]
+      ],
+      "structural_validators": [
+        {"type": "function_defined", "name": "process_event"},
+        {"type": "no_bare_except"}
       ]
     }
   }

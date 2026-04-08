@@ -2,10 +2,16 @@
   "scenario_id": "scenario_memleak_002",
   "task_id": "sre_hard",
   "title": "Diagnose an Event Listener Memory Leak",
-  "description": "A notification service leaks memory because event listeners are registered but never deregistered.",
-  "alert": "notification-svc OOMKilled (2 occurrences, last 30 min)\nContainer memory grew from 150MB to 2.1GB over 25 minutes.",
-  "initial_log_excerpt": "[notification-svc] INFO service started\n[notification-svc] INFO registering event listener for user_signup\n[notification-svc] INFO event processed: user_signup, batch=1000",
-  "service_catalog": ["notification-svc", "event-bus"],
+  "description": "A notification service leaks memory because event listeners are registered inside a batch-processing loop but never deregistered, accumulating hundreds of thousands of handler closures.",
+  "alert": "notification-svc OOMKilled (2 occurrences, last 30 min)\nContainer memory grew from 150MB to 2.1GB over 25 minutes.\nSeverity: CRITICAL",
+  "initial_log_excerpt": "[notification-svc] INFO service started\n[notification-svc] INFO registering event listener for user_signup\n[notification-svc] INFO event processed: user_signup, batch=1000\n[event-bus] WARN high listener count on topic user_signup",
+  "service_catalog": [
+    "notification-svc",
+    "event-bus",
+    "api-gateway",
+    "auth-service",
+    "user-service"
+  ],
   "logs": {
     "notification-svc": [
       "[notification-svc] INFO service started",
@@ -13,11 +19,25 @@
       "[notification-svc] INFO event processed: user_signup, batch=1000",
       "[notification-svc] INFO registering event listener for user_signup",
       "[notification-svc] INFO event processed: user_signup, batch=1000",
-      "[notification-svc] WARN memory pressure detected, GC triggered"
+      "[notification-svc] WARN memory pressure detected, GC triggered",
+      "[notification-svc] ERROR OOMKilled by container runtime"
     ],
     "event-bus": [
       "[event-bus] INFO listener count for user_signup: 347",
-      "[event-bus] WARN high listener count on topic user_signup"
+      "[event-bus] WARN high listener count on topic user_signup",
+      "[event-bus] INFO other topics listener counts normal: order_placed=1, payment_complete=1"
+    ],
+    "api-gateway": [
+      "[api-gateway] INFO health check passed",
+      "[api-gateway] INFO routing to notification-svc"
+    ],
+    "auth-service": [
+      "[auth-service] INFO token validated user_id=5501",
+      "[auth-service] INFO session refreshed"
+    ],
+    "user-service": [
+      "[user-service] INFO user created user_id=9001",
+      "[user-service] INFO user_signup event published to event-bus"
     ]
   },
   "metrics": {
@@ -29,6 +49,18 @@
       "listener_count": {
         "timestamps": ["09:00", "09:05", "09:10", "09:15", "09:20", "09:25"],
         "values": [1, 58, 115, 173, 231, 347]
+      }
+    },
+    "event-bus": {
+      "messages_per_min": {
+        "timestamps": ["09:00", "09:05", "09:10", "09:15", "09:20", "09:25"],
+        "values": [200, 210, 205, 208, 212, 198]
+      }
+    },
+    "auth-service": {
+      "latency_p99_ms": {
+        "timestamps": ["09:00", "09:05", "09:10", "09:15", "09:20", "09:25"],
+        "values": [12, 11, 13, 12, 11, 12]
       }
     }
   },
@@ -45,7 +77,7 @@
     }
   ],
   "diffs": {
-    "deploy-187": "diff --git a/notification-svc/handlers.py b/notification-svc/handlers.py\n+def handle_batch(events):\n+    for event in events:\n+        bus.register_listener('user_signup', on_signup)\n+        send_welcome_email(event.user_id)\n+# NOTE: listener is registered inside the loop but never removed",
+    "deploy-187": "diff --git a/notification-svc/handlers.py b/notification-svc/handlers.py\n+def handle_batch(events):\n+    for event in events:\n+        bus.register_listener('user_signup', on_signup)\n+        send_welcome_email(event.user_id)\n+# BUG: listener is registered inside the loop but never removed",
     "deploy-186": "diff --git a/event-bus/config.yaml b/event-bus/config.yaml\n-max_partitions: 32\n+max_partitions: 64"
   },
   "heap_summaries": {
@@ -55,7 +87,7 @@
         {"type": "Closure", "count": 347000},
         {"type": "str", "count": 52100}
       ],
-      "note": "EventHandler instances are accumulating — each batch registers new listeners without removing old ones"
+      "note": "EventHandler instances are accumulating — each batch registers new listeners without removing old ones. Linear growth correlates with listener_count metric."
     }
   },
   "relevant_services": ["notification-svc"],
@@ -65,19 +97,29 @@
     "heap_summary_timestamp": "2026-04-06T09:25:00Z"
   },
   "diagnosis_fields": {
+    "root_cause_service": {
+      "value": "notification-svc",
+      "weight": 0.15,
+      "match_mode": "equals"
+    },
     "source": {
       "value": "event listener registration in loop",
-      "weight": 0.2,
+      "weight": 0.20,
       "match_mode": "contains"
     },
     "root_cause": {
       "value": "listeners registered but never deregistered",
-      "weight": 0.2,
+      "weight": 0.25,
+      "match_mode": "contains"
+    },
+    "trigger_event": {
+      "value": "deploy-187",
+      "weight": 0.15,
       "match_mode": "contains"
     },
     "evidence": {
       "value": "EventHandler instances accumulating",
-      "weight": 0.2,
+      "weight": 0.25,
       "match_mode": "contains"
     }
   },

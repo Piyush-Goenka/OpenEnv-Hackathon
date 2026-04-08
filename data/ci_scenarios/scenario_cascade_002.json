@@ -2,15 +2,15 @@
   "scenario_id": "scenario_cascade_002",
   "task_id": "ci_hard",
   "title": "Fix the Cascading Return Type Change",
-  "description": "A function's return type changed from dict to a dataclass, breaking consumers.",
+  "description": "A function's return type changed from dict to a dataclass, breaking all dict-style access in consumers and tests.",
   "pr_diff": "PR Diff:\n  - def fetch_config() -> dict:\n  -     return {\"host\": \"db.local\", \"port\": 5432}\n  + @dataclass\n  + class Config:\n  +     host: str\n  +     port: int\n  + def fetch_config() -> Config:\n  +     return Config(host=\"db.local\", port=5432)",
-  "initial_ci_output": "[FAILED] mypy\nerror: Item \"Config\" of ... has no attribute \"__getitem__\" [index-error] (x4)\n\n[FAILED] unit_tests\nTypeError: 'Config' object is not subscriptable\n\n[FAILED] integration\nKeyError: config['host'] no longer valid",
+  "initial_ci_output": "[FAILED] mypy\nerror: Item \"Config\" of ... has no attribute \"__getitem__\" [index-error] (x4)\n\n[FAILED] unit_tests\nTypeError: 'Config' object is not subscriptable\n\n[FAILED] integration\nKeyError: config['host'] no longer valid\n\n[FAILED] full_suite\nMultiple failures from dict→dataclass migration",
   "files": {
-    "src/config_loader.py": "from dataclasses import dataclass\n\n@dataclass\nclass Config:\n    host: str\n    port: int\n\ndef fetch_config() -> Config:\n    return Config(host=\"db.local\", port=5432)\n",
-    "src/database.py": "config = fetch_config()\nconn = connect(config[\"host\"], config[\"port\"])\n",
-    "src/server.py": "config = fetch_config()\nprint(f\"Listening on {config['host']}:{config['port']}\")\n",
-    "tests/test_config.py": "def test_config_host():\n    config = fetch_config()\n    assert config[\"host\"] == \"db.local\"\n",
-    "tests/test_integration.py": "config = fetch_config()\nassert config[\"host\"] == \"db.local\" and config[\"port\"] == 5432\n"
+    "src/config_loader.py": "from dataclasses import dataclass\nfrom typing import Optional\n\n\n@dataclass\nclass Config:\n    host: str\n    port: int\n    ssl: bool = False\n    pool_size: int = 10\n\n\ndef fetch_config(env: str = \"production\") -> Config:\n    \"\"\"Load database configuration for the given environment.\"\"\"\n    if env == \"test\":\n        return Config(host=\"localhost\", port=5433, ssl=False)\n    return Config(host=\"db.local\", port=5432, ssl=True)\n\n\ndef get_connection_string(config: Config) -> str:\n    proto = \"postgresql+ssl\" if config.ssl else \"postgresql\"\n    return f\"{proto}://{config.host}:{config.port}\"\n",
+    "src/database.py": "from src.config_loader import fetch_config\n\n\ndef connect_db():\n    config = fetch_config()\n    conn_str = f\"postgresql://{config['host']}:{config['port']}\"\n    return create_connection(conn_str)\n\n\ndef create_connection(conn_str: str):\n    return {\"connection\": conn_str, \"active\": True}\n",
+    "src/server.py": "from src.config_loader import fetch_config\n\n\ndef start_server():\n    config = fetch_config()\n    print(f\"Listening on {config['host']}:{config['port']}\")\n    return config\n",
+    "tests/test_config.py": "from src.config_loader import fetch_config\n\n\ndef test_config_host():\n    config = fetch_config()\n    assert config[\"host\"] == \"db.local\"\n\n\ndef test_config_port():\n    config = fetch_config()\n    assert config[\"port\"] == 5432\n",
+    "tests/test_integration.py": "from src.config_loader import fetch_config\n\n\ndef test_full_config():\n    config = fetch_config()\n    assert config[\"host\"] == \"db.local\" and config[\"port\"] == 5432\n"
   },
   "relevant_files": [
     "src/config_loader.py", "src/database.py", "src/server.py",
@@ -19,32 +19,45 @@
   "parse_tokens_any": ["config.host", "config.port", "Config("],
   "checks": {
     "mypy": {
-      "failure_output": "mypy: 'Config' object is not subscriptable [index-error] (x4)",
+      "failure_output": "mypy: 'Config' object is not subscriptable [index-error] (x4 across database.py, server.py, tests)",
       "success_output": "mypy: all clear",
       "required_tokens_any_of": [
+        ["config.host", "config.port"],
         ["config.host", "config.port"]
+      ],
+      "structural_validators": [
+        {"type": "function_defined", "name": "fetch_config"}
       ]
     },
     "unit_tests": {
-      "failure_output": "TypeError: 'Config' object is not subscriptable in test_config_host",
-      "success_output": "PASSED tests/test_config.py::test_config_host",
+      "failure_output": "TypeError: 'Config' object is not subscriptable in test_config_host and test_config_port",
+      "success_output": "PASSED tests/test_config.py::test_config_host\nPASSED tests/test_config.py::test_config_port",
       "required_tokens_any_of": [
         ["config.host == \"db.local\""],
-        ["assert config.host"]
+        ["assert config.host"],
+        ["config.host", "config.port"]
+      ],
+      "structural_validators": [
+        {"type": "no_bare_except"}
       ]
     },
     "integration": {
-      "failure_output": "KeyError: 'Config' object does not support [] access in integration test",
+      "failure_output": "KeyError: 'Config' object does not support bracket access in integration test",
       "success_output": "PASSED integration tests",
       "required_tokens_any_of": [
         ["config.host", "config.port"]
-      ]
+      ],
+      "structural_validators": []
     },
     "full_suite": {
-      "failure_output": "full suite still has failures from dict→dataclass migration",
-      "success_output": "full suite green",
+      "failure_output": "full suite still has failures from dict→dataclass migration in 5 files",
+      "success_output": "full suite green — all bracket access converted to attribute access",
       "required_tokens_any_of": [
         ["config.host", "config.port", "assert config.host"]
+      ],
+      "structural_validators": [
+        {"type": "function_defined", "name": "fetch_config"},
+        {"type": "no_bare_except"}
       ]
     }
   }

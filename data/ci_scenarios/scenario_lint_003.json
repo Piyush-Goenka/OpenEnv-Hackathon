@@ -2,23 +2,26 @@
   "scenario_id": "scenario_lint_003",
   "task_id": "ci_easy",
   "title": "Fix the None Comparison",
-  "description": "Code uses equality comparison with None instead of identity check.",
-  "pr_diff": "PR Diff:\n  + def validate_user(user):\n  +     if user.email == None:\n  +         raise ValueError(\"Email required\")\n  +     return True",
-  "initial_ci_output": "ruff check src/validator.py\nsrc/validator.py:12:22: E711 Comparison to `None` (use `is` or `is not`)\nFAILED",
+  "description": "Code uses equality comparison with None instead of identity check, violating E711.",
+  "pr_diff": "PR Diff:\n  + def validate_user(user):\n  +     if user.email == None:\n  +         raise ValueError(\"Email required\")\n  +     if user.name == None:\n  +         raise ValueError(\"Name required\")\n  +     return True",
+  "initial_ci_output": "ruff check src/validator.py\nsrc/validator.py:12:22: E711 Comparison to `None` (use `is` or `is not`)\nsrc/validator.py:14:21: E711 Comparison to `None` (use `is` or `is not`)\nFAILED",
   "files": {
-    "src/validator.py": "def validate_user(user):\n    if user.email == None:\n        raise ValueError(\"Email required\")\n    return True\n"
+    "src/validator.py": "from dataclasses import dataclass\n\n\n@dataclass\nclass User:\n    name: str | None = None\n    email: str | None = None\n    role: str = \"viewer\"\n\n\ndef validate_user(user: User) -> bool:\n    \"\"\"Validate that a user has required fields set.\"\"\"\n    if user.email == None:\n        raise ValueError(\"Email required\")\n    if user.name == None:\n        raise ValueError(\"Name required\")\n    return True\n\n\ndef is_admin(user: User) -> bool:\n    return user.role == \"admin\"\n"
   },
   "relevant_files": ["src/validator.py"],
   "parse_tokens_any": ["def ", "return ", "raise "],
   "checks": {
     "lint": {
-      "failure_output": "ruff check src/validator.py\nsrc/validator.py:12:22: E711 Comparison to `None` (use `is` or `is not`)\nFAILED",
+      "failure_output": "ruff check src/validator.py\nsrc/validator.py:12:22: E711 Comparison to `None` (use `is` or `is not`)\nsrc/validator.py:14:21: E711 Comparison to `None` (use `is` or `is not`)\nFAILED",
       "success_output": "ruff check src/validator.py\nAll checks passed.",
       "required_tokens_any_of": [
-        ["def validate_user", "is None", "return True"]
+        ["def validate_user", "is None", "return True"],
+        ["def validate_user", "is None", "raise ValueError"]
       ],
       "structural_validators": [
         {"type": "function_defined", "name": "validate_user"},
+        {"type": "function_defined", "name": "is_admin"},
+        {"type": "no_bare_except"},
         {"type": "ruff_check", "select": "E711"}
       ]
     }

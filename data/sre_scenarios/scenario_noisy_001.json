@@ -2,8 +2,8 @@
   "scenario_id": "scenario_noisy_001",
   "task_id": "sre_easy",
   "title": "Identify the Noisy Service",
-  "description": "Error rate alert with obvious repeated stack traces from one backend service.",
-  "alert": "Error rate threshold exceeded (api-gateway, 5.2%)\nTimestamp: 2026-04-05T14:32:11Z",
+  "description": "Error rate alert fired on api-gateway. One backend service is throwing repeated NullPointerExceptions flooding the error logs.",
+  "alert": "Error rate threshold exceeded (api-gateway, 5.2%)\nTimestamp: 2026-04-05T14:32:11Z\nSeverity: WARNING",
   "initial_log_excerpt": "[auth-service] INFO token validated user_id=8821\n[api-gateway] ERROR downstream call failed: timeout after 30s\n[payment-service] ERROR NullPointerException at PaymentProcessor.java:87\n[payment-service] ERROR NullPointerException at PaymentProcessor.java:87",
   "service_catalog": [
     "auth-service",
@@ -14,28 +14,32 @@
   "logs": {
     "auth-service": [
       "[auth-service] INFO token validated user_id=8821",
-      "[auth-service] INFO token validated user_id=9034"
+      "[auth-service] INFO token validated user_id=9034",
+      "[auth-service] INFO session refreshed for user_id=8821"
     ],
     "api-gateway": [
       "[api-gateway] ERROR downstream call failed: timeout after 30s",
-      "[api-gateway] ERROR downstream call failed: timeout after 30s"
+      "[api-gateway] ERROR downstream call failed: timeout after 30s",
+      "[api-gateway] INFO request routed to auth-service duration=12ms",
+      "[api-gateway] WARN circuit breaker open for payment-service"
     ],
     "payment-service": [
       "[payment-service] ERROR NullPointerException at PaymentProcessor.java:87",
       "[payment-service] ERROR NullPointerException at PaymentProcessor.java:87",
-      "[payment-service] ERROR NullPointerException at PaymentProcessor.java:87"
+      "[payment-service] ERROR NullPointerException at PaymentProcessor.java:87",
+      "[payment-service] ERROR NullPointerException at PaymentProcessor.java:87",
+      "[payment-service] WARN thread pool exhausted, 0/20 available"
     ],
     "notification-svc": [
-      "[notification-svc] INFO email queued for user 9034"
+      "[notification-svc] INFO email queued for user 9034",
+      "[notification-svc] INFO webhook delivered to partner_id=44"
     ]
   },
   "metrics": {},
   "deployment_history": [],
   "diffs": {},
   "heap_summaries": {},
-  "relevant_services": [
-    "payment-service"
-  ],
+  "relevant_services": ["payment-service"],
   "query_rewards": {
     "root_cause_service": "payment-service"
   },

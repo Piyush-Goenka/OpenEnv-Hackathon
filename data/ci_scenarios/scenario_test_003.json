@@ -2,12 +2,12 @@
   "scenario_id": "scenario_test_003",
   "task_id": "ci_medium",
   "title": "Fix the Async Await Mismatch",
-  "description": "A sync function was converted to async but tests don't await the call.",
+  "description": "A sync function was converted to async but tests still call it synchronously.",
   "pr_diff": "PR Diff:\n  - def fetch_data(url):\n  -     return requests.get(url).json()\n  + async def fetch_data(url):\n  +     async with aiohttp.ClientSession() as s:\n  +         async with s.get(url) as r:\n  +             return await r.json()",
-  "initial_ci_output": "FAILED tests/test_fetch.py::test_fetch_returns_data\nTypeError: object dict can't be used in 'await' expression\nassert fetch_data(\"http://api/data\") == {\"ok\": True}",
+  "initial_ci_output": "FAILED tests/test_fetch.py::test_fetch_returns_data\nTypeError: object coroutine can't be compared directly\nassert fetch_data(\"http://api/data\") == {\"ok\": True}\n\nFAILED regression: fetch_data must return parsed JSON data, not a coroutine",
   "files": {
-    "src/fetcher.py": "import aiohttp\n\nasync def fetch_data(url):\n    async with aiohttp.ClientSession() as s:\n        async with s.get(url) as r:\n            return await r.json()\n",
-    "tests/test_fetch.py": "from src.fetcher import fetch_data\n\ndef test_fetch_returns_data():\n    assert fetch_data(\"http://api/data\") == {\"ok\": True}\n"
+    "src/fetcher.py": "import aiohttp\nfrom typing import Any\n\n\nasync def fetch_data(url: str) -> dict[str, Any]:\n    \"\"\"Fetch JSON data from a URL using aiohttp.\"\"\"\n    async with aiohttp.ClientSession() as session:\n        async with session.get(url) as response:\n            return await response.json()\n\n\nasync def fetch_text(url: str) -> str:\n    \"\"\"Fetch raw text from a URL.\"\"\"\n    async with aiohttp.ClientSession() as session:\n        async with session.get(url) as response:\n            return await response.text()\n",
+    "tests/test_fetch.py": "from src.fetcher import fetch_data\n\n\ndef test_fetch_returns_data():\n    result = fetch_data(\"http://api/data\")\n    assert result == {\"ok\": True}\n\n\ndef test_fetch_returns_dict():\n    result = fetch_data(\"http://api/health\")\n    assert isinstance(result, dict)\n"
   },
   "relevant_files": ["src/fetcher.py", "tests/test_fetch.py"],
   "parse_tokens_any": ["return ", "assert ", "async "],
@@ -19,6 +19,10 @@
         ["def fetch_data", "return requests.get"],
         ["await fetch_data", "async def test_"],
         ["asyncio.run(fetch_data"]
+      ],
+      "structural_validators": [
+        {"type": "function_defined", "name": "fetch_data"},
+        {"type": "no_bare_except"}
       ]
     },
     "regression_guard": {
@@ -28,6 +32,9 @@
         ["return requests.get", ".json()"],
         ["await", "fetch_data"],
         ["asyncio.run(fetch_data"]
+      ],
+      "structural_validators": [
+        {"type": "function_defined", "name": "fetch_data"}
       ]
     }
   }

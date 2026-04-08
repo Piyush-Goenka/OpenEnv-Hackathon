@@ -2,7 +2,7 @@
   "scenario_id": "scenario_latency_001",
   "task_id": "sre_medium",
   "title": "Trace a Latency Spike Across Services",
-  "description": "Checkout latency regressed because a slow query appeared after a migration removed an index.",
+  "description": "Checkout latency regressed because a slow query appeared after a migration dropped an index on order_items.",
   "alert": "checkout-api P99 latency = 8.4s (baseline: 400ms)\nTimestamp: 2026-04-05T14:32:11Z\nSeverity: CRITICAL",
   "initial_log_excerpt": "[checkout-api] WARN request_id=7db p99 latency exceeded 8000ms\n[cart-service] INFO cart hydrated in 24ms\n[db-proxy] WARN query exceeded threshold: SELECT * FROM order_items WHERE user_id=? duration=7.9s",
   "service_catalog": [
@@ -102,10 +102,7 @@
     "deploy-041": "diff --git a/cart-service/config.yaml b/cart-service/config.yaml\n-cache_ttl: 300\n+cache_ttl: 900"
   },
   "heap_summaries": {},
-  "relevant_services": [
-    "checkout-api",
-    "db-proxy"
-  ],
+  "relevant_services": ["checkout-api", "db-proxy"],
   "query_rewards": {
     "root_cause_service": "db-proxy",
     "correct_diff_id": "deploy-042"
@@ -118,7 +115,7 @@
     },
     "slow_query": {
       "value": "SELECT * FROM order_items WHERE user_id=?",
-      "weight": 0.15,
+      "weight": 0.20,
       "match_mode": "contains"
     },
     "root_cause": {
@@ -129,6 +126,11 @@
     "trigger_event": {
       "value": "deploy-042",
       "weight": 0.15,
+      "match_mode": "contains"
+    },
+    "affected_table": {
+      "value": "order_items",
+      "weight": 0.25,
       "match_mode": "contains"
     }
   },

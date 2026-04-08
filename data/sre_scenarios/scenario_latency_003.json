@@ -2,8 +2,8 @@
   "scenario_id": "scenario_latency_003",
   "task_id": "sre_medium",
   "title": "Trace an Auth Token Re-Validation Storm",
-  "description": "Auth service started re-validating every token due to a config change, causing cascading latency.",
-  "alert": "checkout-api P99 latency = 4.8s (baseline: 380ms)\nTimestamp: 2026-04-07T08:22:00Z",
+  "description": "Auth service started re-validating every token against the IdP due to a config change that disabled the token cache, causing cascading latency.",
+  "alert": "checkout-api P99 latency = 4.8s (baseline: 380ms)\nTimestamp: 2026-04-07T08:22:00Z\nSeverity: CRITICAL",
   "initial_log_excerpt": "[checkout-api] WARN request_id=c44 p99 latency exceeded 4500ms\n[auth-service] INFO token validated user_id=3301\n[auth-service] INFO token validated user_id=3301\n[auth-service] INFO token validated user_id=3301",
   "service_catalog": [
     "checkout-api", "cart-service", "db-proxy",
@@ -13,13 +13,15 @@
     "checkout-api": [
       "[checkout-api] WARN request_id=c44 p99 latency exceeded 4500ms",
       "[checkout-api] INFO downstream=auth-service duration=4200ms (50 re-validations)",
-      "[checkout-api] INFO downstream=db-proxy duration=35ms"
+      "[checkout-api] INFO downstream=db-proxy duration=35ms",
+      "[checkout-api] INFO downstream=cart-service duration=20ms"
     ],
     "cart-service": [
       "[cart-service] INFO cart hydrated in 22ms"
     ],
     "db-proxy": [
-      "[db-proxy] INFO all queries within threshold"
+      "[db-proxy] INFO all queries within threshold",
+      "[db-proxy] INFO connections stable at 24/50"
     ],
     "inventory-api": [
       "[inventory-api] INFO stock lookup duration=14ms"
@@ -29,10 +31,12 @@
       "[auth-service] INFO token validated user_id=3301",
       "[auth-service] INFO token validated user_id=3301",
       "[auth-service] INFO token cache disabled — validating all tokens against IdP",
-      "[auth-service] WARN avg validation latency 84ms (baseline: 2ms cached)"
+      "[auth-service] WARN avg validation latency 84ms (baseline: 2ms cached)",
+      "[auth-service] WARN thread pool saturation: 48/50 threads busy"
     ],
     "cache-layer": [
-      "[cache-layer] INFO hit ratio stable at 93%"
+      "[cache-layer] INFO hit ratio stable at 93%",
+      "[cache-layer] INFO no anomalies detected"
     ]
   },
   "metrics": {
@@ -50,6 +54,12 @@
       "validations_per_request": {
         "timestamps": ["07:45", "08:00", "08:15", "08:22"],
         "values": [1, 1, 1, 50]
+      }
+    },
+    "db-proxy": {
+      "query_latency_p99_ms": {
+        "timestamps": ["07:45", "08:00", "08:15", "08:22"],
+        "values": [32, 34, 31, 35]
       }
     }
   },
@@ -78,17 +88,22 @@
   "diagnosis_fields": {
     "root_cause_service": {
       "value": "auth-service",
-      "weight": 0.2,
+      "weight": 0.20,
       "match_mode": "equals"
     },
     "root_cause": {
       "value": "token cache disabled",
-      "weight": 0.3,
+      "weight": 0.30,
       "match_mode": "contains"
     },
     "trigger_event": {
       "value": "deploy-155",
-      "weight": 0.2,
+      "weight": 0.20,
+      "match_mode": "contains"
+    },
+    "impact": {
+      "value": "re-validating every token",
+      "weight": 0.30,
       "match_mode": "contains"
     }
   },

@@ -2,11 +2,15 @@
   "scenario_id": "scenario_memleak_001",
   "task_id": "sre_hard",
   "title": "Diagnose a Memory Leak Under Load",
-  "description": "A worker-pool grows in memory after a deployment and is OOMKilled repeatedly.",
-  "alert": "worker-pool OOMKilled (3 occurrences, last 20 min)\nContainer memory grew from 200MB to 1.8GB over 18 minutes.",
-  "initial_log_excerpt": "[worker-pool] INFO worker boot complete\n[worker-pool] INFO job cache-warmup started\n[worker-pool] INFO job cache-warmup finished batch=5000",
+  "description": "A worker-pool grows in memory after a deployment that added a cache-warmup background job. The job appends to a module-level list that is never cleared, causing repeated OOMKills.",
+  "alert": "worker-pool OOMKilled (3 occurrences, last 20 min)\nContainer memory grew from 200MB to 1.8GB over 18 minutes.\nSeverity: CRITICAL",
+  "initial_log_excerpt": "[worker-pool] INFO worker boot complete\n[worker-pool] INFO job cache-warmup started\n[worker-pool] INFO job cache-warmup finished batch=5000\n[api-gateway] INFO health check passed",
   "service_catalog": [
-    "worker-pool"
+    "worker-pool",
+    "api-gateway",
+    "redis-cache",
+    "db-primary",
+    "scheduler-service"
   ],
   "logs": {
     "worker-pool": [
@@ -14,19 +18,48 @@
       "[worker-pool] INFO job cache-warmup started",
       "[worker-pool] INFO job cache-warmup finished batch=5000",
       "[worker-pool] INFO job cache-warmup started",
-      "[worker-pool] INFO job cache-warmup finished batch=5000"
+      "[worker-pool] INFO job cache-warmup finished batch=5000",
+      "[worker-pool] WARN memory usage 1.4GB, approaching limit",
+      "[worker-pool] ERROR OOMKilled by container runtime"
+    ],
+    "api-gateway": [
+      "[api-gateway] INFO health check passed",
+      "[api-gateway] INFO request routed to worker-pool"
+    ],
+    "redis-cache": [
+      "[redis-cache] INFO memory usage stable at 450MB",
+      "[redis-cache] INFO eviction count normal: 8/min"
+    ],
+    "db-primary": [
+      "[db-primary] INFO connections stable at 22/100",
+      "[db-primary] INFO query latency normal: p99=8ms"
+    ],
+    "scheduler-service": [
+      "[scheduler-service] INFO cron job cache-warmup triggered every 60s",
+      "[scheduler-service] INFO next run in 42s"
     ]
   },
   "metrics": {
     "worker-pool": {
       "memory_mb": {
-        "values": [
-          200,
-          450,
-          900,
-          1300,
-          1800
-        ]
+        "timestamps": ["14:00", "14:05", "14:10", "14:15", "14:18"],
+        "values": [200, 450, 900, 1300, 1800]
+      },
+      "processed_items_total": {
+        "timestamps": ["14:00", "14:05", "14:10", "14:15", "14:18"],
+        "values": [0, 5000, 10000, 15000, 20000]
+      }
+    },
+    "redis-cache": {
+      "memory_mb": {
+        "timestamps": ["14:00", "14:05", "14:10", "14:15", "14:18"],
+        "values": [448, 450, 451, 449, 450]
+      }
+    },
+    "db-primary": {
+      "active_connections": {
+        "timestamps": ["14:00", "14:05", "14:10", "14:15", "14:18"],
+        "values": [22, 23, 22, 24, 22]
       }
     }
   },
@@ -43,52 +76,56 @@
     }
   ],
   "diffs": {
-    "deploy-204": "diff --git a/jobs/cache_warmup.py b/jobs/cache_warmup.py\n+processed_items = []\n+\n+def run_cache_warmup(items):\n+    for item in items:\n+        processed_items.append(item)\n+        warm_cache(item)\n",
+    "deploy-204": "diff --git a/jobs/cache_warmup.py b/jobs/cache_warmup.py\n+processed_items = []  # module-level list, never cleared\n+\n+def run_cache_warmup(items):\n+    for item in items:\n+        processed_items.append(item)\n+        warm_cache(item)\n+    # NOTE: processed_items is never cleared between runs",
     "deploy-203": "diff --git a/worker/logging.py b/worker/logging.py\n-logger.debug(...)\n+logger.info(...)\n"
   },
   "heap_summaries": {
     "2026-04-05T14:18:00Z": {
       "top_types": [
-        {
-          "type": "ProcessedItem",
-          "count": 184220
-        },
-        {
-          "type": "dict",
-          "count": 92011
-        }
+        {"type": "ProcessedItem", "count": 184220},
+        {"type": "dict", "count": 92011},
+        {"type": "str", "count": 45000}
       ],
-      "note": "ProcessedItem instances retain references from jobs.cache_warmup.processed_items"
+      "note": "ProcessedItem instances retain references from jobs.cache_warmup.processed_items — list grows unboundedly across runs"
     }
   },
-  "relevant_services": [
-    "worker-pool"
-  ],
+  "relevant_services": ["worker-pool"],
   "query_rewards": {
     "root_cause_service": "worker-pool",
     "correct_diff_id": "deploy-204",
     "heap_summary_timestamp": "2026-04-05T14:18:00Z"
   },
   "diagnosis_fields": {
+    "root_cause_service": {
+      "value": "worker-pool",
+      "weight": 0.15,
+      "match_mode": "equals"
+    },
     "source": {
       "value": "cache-warmup job",
-      "weight": 0.2,
+      "weight": 0.20,
       "match_mode": "contains"
     },
     "root_cause": {
-      "value": "processed_items retains references",
-      "weight": 0.2,
+      "value": "processed_items list never cleared",
+      "weight": 0.25,
+      "match_mode": "contains"
+    },
+    "trigger_event": {
+      "value": "deploy-204",
+      "weight": 0.15,
       "match_mode": "contains"
     },
     "evidence": {
       "value": "ProcessedItem instances retain references",
-      "weight": 0.2,
+      "weight": 0.25,
       "match_mode": "contains"
     }
   },
   "accepted_remediations": [
+    "clear processed_items list after each run",
     "clear processed_items list in job teardown",
-    "use weakref",
-    "explicitly del references after processing"
+    "use weakref for processed items",
+    "use a local variable instead of module-level list"
   ]
 }

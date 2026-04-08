@@ -2,15 +2,15 @@
   "scenario_id": "scenario_cascade_003",
   "task_id": "ci_hard",
   "title": "Fix the Method Rename Cascade",
-  "description": "A method was renamed and its parameter order changed, breaking subclasses and callers.",
-  "pr_diff": "PR Diff:\n  - def send_notification(user_id: int, message: str) -> bool:\n  + def dispatch_alert(message: str, user_id: int, priority: str = \"normal\") -> bool:",
-  "initial_ci_output": "[FAILED] mypy\nerror: Module has no attribute \"send_notification\" [attr-error] (x3)\n\n[FAILED] unit_tests\nAttributeError: module has no attribute 'send_notification'\n\n[FAILED] integration\nAssertionError: notification was not dispatched",
+  "description": "A method was renamed from send_notification to dispatch_alert with reordered parameters, breaking all callers and tests.",
+  "pr_diff": "PR Diff:\n  - def send_notification(user_id: int, message: str) -> bool:\n  + def dispatch_alert(message: str, user_id: int, priority: str = \"normal\") -> bool:\n  +     # Parameters reordered: message first, user_id second",
+  "initial_ci_output": "[FAILED] mypy\nerror: Module has no attribute \"send_notification\" [attr-error] (x4)\n\n[FAILED] unit_tests\nAttributeError: module has no attribute 'send_notification'\n\n[FAILED] integration\nAssertionError: notification was not dispatched\n\n[FAILED] full_suite\nAll callers reference old send_notification API",
   "files": {
-    "src/notifier.py": "def dispatch_alert(message: str, user_id: int, priority: str = \"normal\") -> bool:\n    return True\n",
-    "src/handler.py": "from src.notifier import send_notification\nsend_notification(user_id=42, message=\"hello\")\n",
-    "src/scheduler.py": "from src.notifier import send_notification\nresult = send_notification(1, \"scheduled task\")\n",
-    "tests/test_notifier.py": "def test_send():\n    assert send_notification(1, \"test\") is True\n",
-    "tests/test_integration.py": "result = send_notification(user_id=1, message=\"integration\")\nassert result is True\n"
+    "src/notifier.py": "import logging\nfrom typing import Optional\n\nlogger = logging.getLogger(__name__)\n\n\ndef dispatch_alert(\n    message: str,\n    user_id: int,\n    priority: str = \"normal\",\n) -> bool:\n    \"\"\"Send an alert notification to a user.\"\"\"\n    logger.info(f\"Dispatching {priority} alert to user {user_id}: {message}\")\n    return True\n\n\ndef dispatch_bulk_alerts(\n    user_ids: list[int],\n    message: str,\n    priority: str = \"normal\",\n) -> list[bool]:\n    return [dispatch_alert(message, uid, priority) for uid in user_ids]\n",
+    "src/handler.py": "from src.notifier import send_notification\n\n\ndef on_order_complete(order_id: int, user_id: int) -> None:\n    \"\"\"Handle order completion by notifying the user.\"\"\"\n    send_notification(user_id=user_id, message=f\"Order {order_id} complete\")\n",
+    "src/scheduler.py": "from src.notifier import send_notification\n\n\ndef run_scheduled_reminders(user_ids: list[int]) -> int:\n    \"\"\"Send scheduled reminder to each user.\"\"\"\n    sent = 0\n    for uid in user_ids:\n        result = send_notification(uid, \"Scheduled reminder\")\n        if result:\n            sent += 1\n    return sent\n",
+    "tests/test_notifier.py": "from src.notifier import send_notification\n\n\ndef test_send_returns_true():\n    assert send_notification(1, \"test message\") is True\n\n\ndef test_send_with_keyword_args():\n    assert send_notification(user_id=42, message=\"hello\") is True\n",
+    "tests/test_integration.py": "from src.notifier import send_notification\n\n\ndef test_integration_notification():\n    result = send_notification(user_id=1, message=\"integration test\")\n    assert result is True\n"
   },
   "relevant_files": [
     "src/notifier.py", "src/handler.py", "src/scheduler.py",
@@ -19,31 +19,45 @@
   "parse_tokens_any": ["dispatch_alert", "message=", "user_id="],
   "checks": {
     "mypy": {
-      "failure_output": "mypy: Module has no attribute 'send_notification' [attr-error] (x3)",
+      "failure_output": "mypy: Module has no attribute 'send_notification' [attr-error] (x4 in handler, scheduler, tests)",
       "success_output": "mypy: all clear",
       "required_tokens_any_of": [
-        ["dispatch_alert"]
+        ["dispatch_alert"],
+        ["from src.notifier import dispatch_alert"]
+      ],
+      "structural_validators": [
+        {"type": "function_defined", "name": "dispatch_alert"}
       ]
     },
     "unit_tests": {
-      "failure_output": "AttributeError: module has no attribute 'send_notification'",
-      "success_output": "PASSED tests/test_notifier.py",
+      "failure_output": "AttributeError: module 'src.notifier' has no attribute 'send_notification'",
+      "success_output": "PASSED tests/test_notifier.py — all tests pass with new API",
       "required_tokens_any_of": [
-        ["dispatch_alert(", "message="]
+        ["dispatch_alert(", "message="],
+        ["dispatch_alert(\"test message\"", "user_id="]
+      ],
+      "structural_validators": [
+        {"type": "no_bare_except"}
       ]
     },
     "integration": {
-      "failure_output": "AssertionError: notification was not dispatched",
-      "success_output": "PASSED integration tests",
+      "failure_output": "AssertionError: notification was not dispatched — send_notification no longer exists",
+      "success_output": "PASSED integration tests with dispatch_alert",
       "required_tokens_any_of": [
         ["dispatch_alert(", "message=", "user_id="]
-      ]
+      ],
+      "structural_validators": []
     },
     "full_suite": {
-      "failure_output": "full suite still references old send_notification API",
-      "success_output": "full suite green",
+      "failure_output": "full suite still references old send_notification API in handler, scheduler, and tests",
+      "success_output": "full suite green — all references migrated to dispatch_alert",
       "required_tokens_any_of": [
-        ["dispatch_alert(", "message=", "user_id=", "assert"]
+        ["dispatch_alert(", "message=", "user_id=", "assert"],
+        ["from src.notifier import dispatch_alert", "dispatch_alert(", "assert"]
+      ],
+      "structural_validators": [
+        {"type": "function_defined", "name": "dispatch_alert"},
+        {"type": "no_bare_except"}
       ]
     }
   }

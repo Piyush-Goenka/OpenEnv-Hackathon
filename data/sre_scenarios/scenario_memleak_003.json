@@ -2,21 +2,41 @@
   "scenario_id": "scenario_memleak_003",
   "task_id": "sre_hard",
   "title": "Diagnose a Connection Pool Exhaustion Leak",
-  "description": "A session-service leaks database connections because a new code path doesn't close connections in the error branch.",
-  "alert": "session-service OOMKilled + connection pool exhaustion\nContainer memory grew from 180MB to 1.9GB. DB connection count: 4800 (limit: 5000).",
-  "initial_log_excerpt": "[session-service] INFO service boot complete\n[session-service] INFO session refresh started for batch\n[session-service] WARN active DB connections: 4800/5000",
-  "service_catalog": ["session-service", "db-primary"],
+  "description": "A session-service leaks database connections because a new retry code path acquires connections recursively without releasing them, and the exception handler also fails to release.",
+  "alert": "session-service OOMKilled + connection pool exhaustion\nContainer memory grew from 180MB to 1.9GB. DB connection count: 4800 (limit: 5000).\nSeverity: CRITICAL",
+  "initial_log_excerpt": "[session-service] INFO service boot complete\n[session-service] INFO session refresh started for batch\n[session-service] WARN active DB connections: 4800/5000\n[db-primary] WARN max_connections approaching",
+  "service_catalog": [
+    "session-service",
+    "db-primary",
+    "api-gateway",
+    "auth-service",
+    "cache-layer"
+  ],
   "logs": {
     "session-service": [
       "[session-service] INFO service boot complete",
       "[session-service] INFO session refresh started for batch",
       "[session-service] WARN active DB connections: 4800/5000",
       "[session-service] ERROR failed to acquire connection: pool exhausted",
-      "[session-service] WARN session refresh error branch hit — connection not returned to pool"
+      "[session-service] WARN session refresh error branch hit — connection not returned to pool",
+      "[session-service] ERROR recursive retry depth=12, connections leaked"
     ],
     "db-primary": [
       "[db-primary] WARN max_connections approaching: 4800/5000",
-      "[db-primary] INFO query latency normal: p99=12ms"
+      "[db-primary] INFO query latency normal: p99=12ms",
+      "[db-primary] WARN connection churn detected: 200 new connections/min"
+    ],
+    "api-gateway": [
+      "[api-gateway] INFO health check passed",
+      "[api-gateway] INFO routing to session-service"
+    ],
+    "auth-service": [
+      "[auth-service] INFO token validated user_id=7701",
+      "[auth-service] INFO all systems nominal"
+    ],
+    "cache-layer": [
+      "[cache-layer] INFO hit ratio stable at 92%",
+      "[cache-layer] INFO memory usage 380MB, within limits"
     ]
   },
   "metrics": {
@@ -28,6 +48,22 @@
       "active_db_connections": {
         "timestamps": ["10:00", "10:10", "10:20", "10:30", "10:40"],
         "values": [50, 1200, 2400, 3600, 4800]
+      }
+    },
+    "db-primary": {
+      "total_connections": {
+        "timestamps": ["10:00", "10:10", "10:20", "10:30", "10:40"],
+        "values": [80, 1250, 2450, 3650, 4850]
+      },
+      "query_latency_p99_ms": {
+        "timestamps": ["10:00", "10:10", "10:20", "10:30", "10:40"],
+        "values": [10, 11, 12, 14, 18]
+      }
+    },
+    "cache-layer": {
+      "hit_ratio_pct": {
+        "timestamps": ["10:00", "10:10", "10:20", "10:30", "10:40"],
+        "values": [92.1, 92.0, 91.8, 92.2, 91.9]
       }
     }
   },
@@ -54,7 +90,7 @@
         {"type": "SessionRefreshContext", "count": 4800},
         {"type": "dict", "count": 14400}
       ],
-      "note": "PooledConnection instances are not being returned — recursive retry acquires new connection without releasing previous one"
+      "note": "PooledConnection instances are not being returned — recursive retry in refresh_session acquires new connection without releasing the previous one, and exception path also leaks"
     }
   },
   "relevant_services": ["session-service"],
@@ -64,19 +100,29 @@
     "heap_summary_timestamp": "2026-04-07T10:40:00Z"
   },
   "diagnosis_fields": {
+    "root_cause_service": {
+      "value": "session-service",
+      "weight": 0.15,
+      "match_mode": "equals"
+    },
     "source": {
       "value": "session refresh retry",
-      "weight": 0.2,
+      "weight": 0.20,
       "match_mode": "contains"
     },
     "root_cause": {
       "value": "connection not released on error or recursive retry",
-      "weight": 0.2,
+      "weight": 0.25,
+      "match_mode": "contains"
+    },
+    "trigger_event": {
+      "value": "deploy-312",
+      "weight": 0.15,
       "match_mode": "contains"
     },
     "evidence": {
       "value": "PooledConnection instances not being returned",
-      "weight": 0.2,
+      "weight": 0.25,
       "match_mode": "contains"
     }
   },

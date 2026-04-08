@@ -2,31 +2,40 @@
   "scenario_id": "scenario_noisy_002",
   "task_id": "sre_easy",
   "title": "Identify the Failing Auth Service",
-  "description": "Auth service is throwing repeated ConnectionRefused errors to Redis, causing login failures.",
-  "alert": "Error rate threshold exceeded (auth-service, 12.3%)\nTimestamp: 2026-04-06T09:14:00Z",
+  "description": "Auth service is throwing repeated ConnectionRefused errors to its Redis cache, causing cascading login failures.",
+  "alert": "Error rate threshold exceeded (auth-service, 12.3%)\nTimestamp: 2026-04-06T09:14:00Z\nSeverity: CRITICAL",
   "initial_log_excerpt": "[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379\n[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379\n[api-gateway] INFO request routed to checkout-api\n[payment-service] INFO payment processed order_id=4492",
   "service_catalog": [
     "auth-service",
     "api-gateway",
     "payment-service",
-    "redis-cache"
+    "redis-cache",
+    "checkout-api"
   ],
   "logs": {
     "auth-service": [
       "[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379",
       "[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379",
       "[auth-service] ERROR ConnectionRefusedException: Connection refused to redis-cache:6379",
-      "[auth-service] WARN session cache unavailable, falling back to DB"
+      "[auth-service] WARN session cache unavailable, falling back to DB",
+      "[auth-service] WARN response time degraded: p99=2400ms (baseline: 15ms)"
     ],
     "api-gateway": [
       "[api-gateway] INFO request routed to checkout-api",
-      "[api-gateway] INFO request routed to auth-service"
+      "[api-gateway] INFO request routed to auth-service",
+      "[api-gateway] WARN auth-service latency spike detected"
     ],
     "payment-service": [
-      "[payment-service] INFO payment processed order_id=4492"
+      "[payment-service] INFO payment processed order_id=4492",
+      "[payment-service] INFO payment processed order_id=4493"
     ],
     "redis-cache": [
-      "[redis-cache] FATAL bind: address already in use, shutting down"
+      "[redis-cache] FATAL bind: address already in use, shutting down",
+      "[redis-cache] FATAL process exited with code 1"
+    ],
+    "checkout-api": [
+      "[checkout-api] INFO checkout completed order_id=4492",
+      "[checkout-api] INFO health check passed"
     ]
   },
   "metrics": {},

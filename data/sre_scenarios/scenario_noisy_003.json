@@ -2,31 +2,40 @@
   "scenario_id": "scenario_noisy_003",
   "task_id": "sre_easy",
   "title": "Identify the Crashing Inventory Service",
-  "description": "Inventory service is throwing IndexOutOfBounds on a batch stock update, flooding error logs.",
-  "alert": "Error rate threshold exceeded (api-gateway, 3.8%)\nTimestamp: 2026-04-07T16:45:00Z",
+  "description": "Inventory service is throwing IndexOutOfBounds on a batch stock update, flooding error logs and causing api-gateway timeouts.",
+  "alert": "Error rate threshold exceeded (api-gateway, 3.8%)\nTimestamp: 2026-04-07T16:45:00Z\nSeverity: WARNING",
   "initial_log_excerpt": "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134\n[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134\n[api-gateway] WARN downstream timeout for inventory-service\n[checkout-api] INFO checkout completed order_id=7821",
   "service_catalog": [
     "api-gateway",
     "checkout-api",
     "inventory-service",
-    "warehouse-sync"
+    "warehouse-sync",
+    "notification-svc"
   ],
   "logs": {
     "api-gateway": [
       "[api-gateway] WARN downstream timeout for inventory-service",
-      "[api-gateway] INFO request routed to checkout-api"
+      "[api-gateway] WARN downstream timeout for inventory-service",
+      "[api-gateway] INFO request routed to checkout-api duration=45ms",
+      "[api-gateway] INFO health check passed"
     ],
     "checkout-api": [
-      "[checkout-api] INFO checkout completed order_id=7821"
+      "[checkout-api] INFO checkout completed order_id=7821",
+      "[checkout-api] INFO checkout completed order_id=7822"
     ],
     "inventory-service": [
       "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134",
       "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134",
       "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134",
-      "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134"
+      "[inventory-service] ERROR IndexOutOfBoundsException at BatchUpdater.java:134",
+      "[inventory-service] WARN batch processing halted, 0 of 500 items completed"
     ],
     "warehouse-sync": [
-      "[warehouse-sync] INFO sync completed for warehouse WH-03"
+      "[warehouse-sync] INFO sync completed for warehouse WH-03",
+      "[warehouse-sync] INFO inventory delta pushed: +120 units"
+    ],
+    "notification-svc": [
+      "[notification-svc] INFO email queued for order 7821"
     ]
   },
   "metrics": {},
