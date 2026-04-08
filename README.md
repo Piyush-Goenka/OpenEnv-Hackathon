@@ -1,6 +1,6 @@
 ---
 title: dev-reliability-env
-emoji: wrench
+emoji: 🔧
 colorFrom: blue
 colorTo: green
 sdk: docker
