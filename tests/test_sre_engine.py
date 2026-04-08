@@ -159,7 +159,7 @@ class SREEngineRepeatedQueryTest(unittest.TestCase):
         runtime = _make_runtime()
         engine.handle_action(runtime, "get_logs", {"service": "svc-b"}, 1)
         r2 = engine.handle_action(runtime, "get_logs", {"service": "svc-b"}, 2)
-        self.assertIn("repeated identical query penalty", r2.feedback)
+        self.assertIn("repeated query penalty", r2.feedback)
 
     def test_different_queries_no_penalty(self) -> None:
         engine = SREEngine()
@@ -174,19 +174,19 @@ class SREEngineRelevantServiceRewardTest(unittest.TestCase):
         engine = SREEngine()
         runtime = _make_runtime()
         result = engine.handle_action(runtime, "get_logs", {"service": "svc-a"}, 1)
-        self.assertIn("queried a new relevant service", result.feedback)
+        self.assertIn("queried relevant service", result.feedback)
 
     def test_irrelevant_service_no_bonus(self) -> None:
         engine = SREEngine()
         runtime = _make_runtime()
         result = engine.handle_action(runtime, "get_logs", {"service": "svc-b"}, 1)
-        self.assertNotIn("queried a new relevant service", result.feedback)
+        self.assertNotIn("queried relevant service", result.feedback)
 
     def test_root_cause_service_reward(self) -> None:
         engine = SREEngine()
         runtime = _make_runtime()
         result = engine.handle_action(runtime, "get_logs", {"service": "svc-a"}, 1)
-        self.assertIn("queried the root-cause service", result.feedback)
+        self.assertIn("queried root-cause service", result.feedback)
 
 
 class SREEngineDiagnosisTest(unittest.TestCase):
@@ -224,7 +224,7 @@ class SREEngineDiagnosisTest(unittest.TestCase):
             1,
         )
         self.assertFalse(runtime.diagnosis_correct)
-        self.assertEqual(result.reward, 0.0)  # wrong penalty clamped to 0
+        self.assertEqual(result.reward, -0.05)  # real negative penalty
 
     def test_contains_match_mode(self) -> None:
         runtime = _make_runtime()
@@ -246,6 +246,44 @@ class SREEngineDiagnosisTest(unittest.TestCase):
             1,
         )
         self.assertTrue(result.done)
+
+    def test_correct_diagnosis_repeated_gives_no_reward(self) -> None:
+        """Delta-reward: identical re-submission must not earn reward (farming prevention)."""
+        runtime = _make_runtime()
+        payload = {"root_cause_service": "svc-a", "error_type": "something broke"}
+        r1 = self.engine.handle_action(runtime, "submit_diagnosis", payload, 1)
+        r2 = self.engine.handle_action(runtime, "submit_diagnosis", payload, 2)
+        self.assertGreater(r1.reward, 0.0)
+        self.assertEqual(r2.reward, 0.0)
+
+    def test_partial_then_correct_rewards_delta_only(self) -> None:
+        """Upgrading from partial to correct earns only the marginal improvement."""
+        runtime = _make_runtime()
+        r1 = self.engine.handle_action(
+            runtime, "submit_diagnosis",
+            {"root_cause_service": "svc-a", "error_type": "wrong"},  # 0.5 weight correct
+            1,
+        )
+        r2 = self.engine.handle_action(
+            runtime, "submit_diagnosis",
+            {"root_cause_service": "svc-a", "error_type": "something broke"},  # 1.0 correct
+            2,
+        )
+        # Both steps give reward; second is smaller (delta only, later step)
+        self.assertGreater(r1.reward, 0.0)
+        self.assertGreater(r2.reward, 0.0)
+        self.assertLess(r2.reward, r1.reward)
+
+    def test_diagnosis_farming_capped(self) -> None:
+        """Repeated correct diagnosis submissions cannot push score above first reward."""
+        runtime = _make_runtime()
+        payload = {"root_cause_service": "svc-a", "error_type": "something broke"}
+        rewards = [
+            self.engine.handle_action(runtime, "submit_diagnosis", payload, s).reward
+            for s in range(1, 6)
+        ]
+        self.assertGreater(rewards[0], 0.0)
+        self.assertEqual(sum(rewards[1:]), 0.0)
 
 
 class SREEngineRemediationTest(unittest.TestCase):
@@ -289,6 +327,29 @@ class SREEngineRemediationTest(unittest.TestCase):
             1,
         )
         self.assertTrue(runtime.remediation_correct)
+
+    def test_remediation_farming_blocked(self) -> None:
+        """Repeated correct remediation must yield 0 reward after first submission."""
+        runtime = _make_runtime()
+        runtime.diagnosis_correct = True
+        r1 = self.engine.handle_action(runtime, "submit_remediation", {"action": "restart svc-a"}, 1)
+        r2 = self.engine.handle_action(runtime, "submit_remediation", {"action": "restart svc-a"}, 2)
+        r3 = self.engine.handle_action(runtime, "submit_remediation", {"action": "rollback deploy-001"}, 3)
+        self.assertGreater(r1.reward, 0.0)
+        self.assertEqual(r2.reward, 0.0)
+        self.assertEqual(r3.reward, 0.0)
+
+    def test_wrong_then_correct_remediation_earns_reward(self) -> None:
+        """First wrong, then correct — agent can upgrade (delta-reward)."""
+        runtime = _make_runtime()
+        runtime.diagnosis_correct = True
+        r1 = self.engine.handle_action(runtime, "submit_remediation", {"action": "do nothing"}, 1)
+        r2 = self.engine.handle_action(runtime, "submit_remediation", {"action": "restart svc-a"}, 2)
+        self.assertEqual(r1.reward, 0.0)
+        self.assertGreater(r2.reward, 0.0)  # upgrade earns reward
+        # But no further farming
+        r3 = self.engine.handle_action(runtime, "submit_remediation", {"action": "restart svc-a"}, 3)
+        self.assertEqual(r3.reward, 0.0)
 
 
 class SREEngineUnsupportedActionTest(unittest.TestCase):

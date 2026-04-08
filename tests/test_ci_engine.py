@@ -157,7 +157,7 @@ class CIEngineSubmitPatchTest(unittest.TestCase):
             runtime, "submit_patch", {"patch": patch, "file": "src/main.py"}, 2
         )
         # Second submission has repeated patch penalty
-        self.assertIn("repeated identical patch penalty", r2.feedback)
+        self.assertIn("repeated patch penalty", r2.feedback)
 
     def test_all_green_marks_done(self) -> None:
         scenario = _make_scenario(

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from server.reward import sre_diagnosis_reward, sre_query_reward, sre_remediation_reward, SRERewardConfig
+from server.reward import clamp_reward, sre_diagnosis_reward, sre_query_reward, sre_remediation_reward, SRERewardConfig
 from tasks.base import TaskDefinition
 
 
@@ -23,6 +23,10 @@ class SREEpisodeRuntime:
     scenario: dict[str, Any]
     queries_made: list[str] = field(default_factory=list)
     services_investigated: list[str] = field(default_factory=list)
+    # Tracks one-time reward signals already claimed to prevent farming
+    one_time_rewards_claimed: set[str] = field(default_factory=set)
+    # Best undecayed diagnosis score achieved so far — only improvements earn reward
+    best_diagnosis_score: float = 0.0
     diagnosis_submitted: bool = False
     remediation_submitted: bool = False
     diagnosis_correct: bool = False
@@ -72,19 +76,34 @@ class SREEngine:
         runtime.queries_made.append(fingerprint)
 
         service = str(payload.get("service", "")).strip()
-        root_cause_service = runtime.scenario.get("query_rewards", {}).get("root_cause_service", "")
+        query_rewards = runtime.scenario.get("query_rewards", {})
+        root_cause_service = query_rewards.get("root_cause_service", "")
         relevant_services = set(runtime.scenario.get("relevant_services", []))
+        claimed = runtime.one_time_rewards_claimed
+
+        # One-time signals: only fire the first time each condition is met
         new_relevant_service = False
         queried_root_cause_service = False
 
         if service and service not in runtime.services_investigated:
             runtime.services_investigated.append(service)
-            if service in relevant_services:
+            if service in relevant_services and service not in claimed:
                 new_relevant_service = True
-        if service and service == root_cause_service:
-            queried_root_cause_service = True
+                claimed.add(f"relevant:{service}")
+            # Root-cause bonus only on the FIRST query to that service
+            if service == root_cause_service and "root_cause_service" not in claimed:
+                queried_root_cause_service = True
+                claimed.add("root_cause_service")
 
-        queried_deployment_history = action_type == "get_deployment_history"
+        # Deployment history: one-time reward
+        queried_deployment_history = (
+            action_type == "get_deployment_history"
+            and "deployment_history" not in claimed
+        )
+        if queried_deployment_history:
+            claimed.add("deployment_history")
+
+        # Correct diff: one-time reward
         queried_correct_diff = False
         queried_heap_summary = False
 
@@ -94,15 +113,22 @@ class SREEngine:
             tool_results = self._format_metrics(runtime.scenario, payload)
         elif action_type == "get_diff":
             tool_results = self._format_diff(runtime.scenario, payload)
-            queried_correct_diff = payload.get("deploy_id") == runtime.scenario.get("query_rewards", {}).get(
-                "correct_diff_id"
-            )
+            correct_diff_id = query_rewards.get("correct_diff_id")
+            if (
+                payload.get("deploy_id") == correct_diff_id
+                and "correct_diff" not in claimed
+            ):
+                queried_correct_diff = True
+                claimed.add("correct_diff")
         elif action_type == "get_heap_summary":
             tool_results = self._format_heap_summary(runtime.scenario, payload)
-            queried_heap_summary = (
-                payload.get("timestamp")
-                == runtime.scenario.get("query_rewards", {}).get("heap_summary_timestamp")
-            )
+            correct_ts = query_rewards.get("heap_summary_timestamp")
+            if (
+                payload.get("timestamp") == correct_ts
+                and "heap_summary" not in claimed
+            ):
+                queried_heap_summary = True
+                claimed.add("heap_summary")
         else:
             tool_results = self._format_deployment_history(runtime.scenario)
 
@@ -148,14 +174,35 @@ class SREEngine:
             matched = expected == submitted if match_mode == "equals" else expected in submitted
             field_results.append((field_name, matched, float(config["weight"])))
 
+        runtime.diagnosis_correct = all(match for _, match, _ in field_results) and bool(field_results)
+
         scenario_config = runtime.scenario.get("reward_config", {})
         config_obj = SRERewardConfig(**scenario_config) if scenario_config else SRERewardConfig()
 
-        reward, notes = sre_diagnosis_reward(field_results, step_count, config_obj)
-        runtime.diagnosis_correct = all(match for _, match, _ in field_results) and bool(field_results)
-        feedback = "Diagnosis submitted."
-        if notes:
-            feedback = f"{feedback} {'; '.join(notes)}."
+        # Delta-reward: only genuine improvements over best previous submission earn reward.
+        # Prevents farming (agent repeatedly submitting correct diagnosis before remediation).
+        undecayed = sum(
+            weight * config_obj.diagnosis_weight_scale
+            for _, matched, weight in field_results
+            if matched
+        )
+        delta = undecayed - runtime.best_diagnosis_score
+
+        if delta > 0:
+            runtime.best_diagnosis_score = undecayed
+            reward = clamp_reward(delta * (config_obj.step_decay_factor ** step_count))
+            notes = [f"correct {name}" for name, matched, _ in field_results if matched]
+            feedback = "Diagnosis submitted."
+            if notes:
+                feedback = f"{feedback} {'; '.join(notes)}."
+        elif not any(matched for _, matched, _ in field_results) and runtime.best_diagnosis_score == 0.0:
+            # First attempt was entirely wrong — apply negative penalty (clamped to 0 by environment)
+            reward = clamp_reward(-config_obj.wrong_diagnosis_penalty)
+            feedback = "Diagnosis submitted. wrong diagnosis penalty."
+        else:
+            # No improvement over best — silent zero reward
+            reward = 0.0
+            feedback = "Diagnosis submitted. No improvement over previous submission."
 
         return SREEngineResult(
             reward=reward,
@@ -169,20 +216,33 @@ class SREEngine:
         payload: dict[str, Any],
         step_count: int,
     ) -> SREEngineResult:
-        runtime.remediation_submitted = True
         submitted = " ".join(str(value) for value in payload.values()).strip().lower()
         accepted = [
             remediation.strip().lower()
             for remediation in runtime.scenario.get("accepted_remediations", [])
         ]
-        runtime.remediation_correct = any(candidate in submitted for candidate in accepted)
+        is_correct = any(candidate in submitted for candidate in accepted)
+        runtime.remediation_correct = is_correct
+
+        already_rewarded = "remediation_rewarded" in runtime.one_time_rewards_claimed
+        runtime.remediation_submitted = True
+
         scenario_config = runtime.scenario.get("reward_config", {})
         config_obj = SRERewardConfig(**scenario_config) if scenario_config else SRERewardConfig()
 
-        reward, notes = sre_remediation_reward(runtime.remediation_correct, step_count, config_obj)
-        feedback = "Remediation submitted."
-        if notes:
-            feedback = f"{feedback} {'; '.join(notes)}."
+        if is_correct and not already_rewarded:
+            # First correct submission — full reward
+            runtime.one_time_rewards_claimed.add("remediation_rewarded")
+            reward, notes = sre_remediation_reward(True, step_count, config_obj)
+            feedback = f"Remediation submitted. {'; '.join(notes)}."
+        elif already_rewarded:
+            # Already got the reward — no additional reward (farming prevention)
+            reward = 0.0
+            feedback = "Remediation submitted. No improvement over previous submission."
+        else:
+            # Wrong submission, never been rewarded — zero reward (can retry)
+            reward = 0.0
+            feedback = "Remediation submitted. incorrect remediation."
 
         return SREEngineResult(
             reward=reward,

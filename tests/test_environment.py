@@ -176,22 +176,30 @@ class EnvironmentScoreAccumulationTest(unittest.TestCase):
         env = DevReliabilityEnvironment()
         env.reset(seed=42, task_id="ci_easy")
         files = list(env.state.current_files.keys())
-        code = env.state.current_files[files[0]]
-        # Submit a valid patch
+        # Patch that satisfies ci_easy seed=42 lint check (needs validate_user + is_admin)
+        passing_patch = (
+            "def validate_user(user):\n"
+            "    if user is None:\n"
+            "        raise ValueError('user required')\n"
+            "    return True\n"
+            "\n"
+            "def is_admin(user):\n"
+            "    return user is not None and user.get('role') == 'admin'\n"
+        )
         a1 = DevReliabilityAction(
-            action_type="submit_patch", payload={"patch": code, "file": files[0]}
+            action_type="submit_patch", payload={"patch": passing_patch, "file": files[0]}
         )
         env.step(a1)
         score1 = env.state.final_score
+        # Passing patch must turn checks green → reward > 0
+        self.assertGreater(score1, 0.0)
 
-        # Submit again (different code)
+        # A second no-progress patch should not change the score (no new green checks)
         a2 = DevReliabilityAction(
             action_type="submit_patch", payload={"patch": "x = 1\n", "file": files[0]}
         )
         env.step(a2)
         score2 = env.state.final_score
-        # Score should have changed (accumulated)
-        self.assertNotEqual(score1, 0.0)
         self.assertGreaterEqual(score2, 0.0)
 
 

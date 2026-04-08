@@ -131,9 +131,12 @@ class CIEngine:
         config_obj = CIRewardConfig(**scenario_config) if scenario_config else CIRewardConfig()
 
         all_green = all(runtime.checks_status.values()) if runtime.checks_status else False
+        # Gate code-quality rewards on actual check progress to prevent farming
+        # (agent submitting valid-but-irrelevant Python every step for free +0.10)
+        has_progress = newly_green_checks > 0
         reward, notes = ci_step_reward(
-            patch_applies=patch_applies,
-            parses=parses,
+            patch_applies=patch_applies and has_progress,
+            parses=parses and has_progress,
             newly_green_checks=newly_green_checks,
             all_green=all_green,
             repeated_patch=repeated_patch,
