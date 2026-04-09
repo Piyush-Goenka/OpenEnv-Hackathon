@@ -84,7 +84,7 @@ class DevReliabilityEnvironment(Environment):
             ),
             max_steps=task.max_steps,
             done=False,
-            final_score=0.0,
+            final_score=0.001,
         )
         return self._build_observation(
             reward=None,
@@ -135,7 +135,8 @@ class DevReliabilityEnvironment(Environment):
             self._last_tool_results = result.tool_results
             self._last_ci_output = None
 
-        self._state.final_score = round(max(0.0, min(1.0, self._state.final_score + (result.reward or 0.0))), 3)
+        raw_score = self._state.final_score + (result.reward or 0.0)
+        self._state.final_score = round(max(0.001, min(0.999, raw_score)), 3)
         done = result.done or self._state.step_count >= self._state.max_steps
         feedback = result.feedback
         if done and not result.done and self._state.step_count >= self._state.max_steps:

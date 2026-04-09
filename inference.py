@@ -195,7 +195,7 @@ def parse_action(response_text: str, observation) -> DevReliabilityAction:
 def run_task(task_id: str, llm_client: OpenAI) -> float:
     rewards: list[float] = []
     steps_taken = 0
-    score = 0.0
+    score = 0.001
     success = False
 
     log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
@@ -247,7 +247,7 @@ def run_task(task_id: str, llm_client: OpenAI) -> float:
 
             # Use the environment's final_score which is always in [0, 1]
             state = env.state()
-            score = state.final_score if state else 0.0
+            score = state.final_score if state else 0.001
             success = score > 0.0
 
     except Exception as e:
@@ -273,7 +273,7 @@ def main() -> None:
         # Emit END lines for any tasks that didn't run
         for task_id in TASK_IDS:
             log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
-            log_end(success=False, steps=0, score=0.0, rewards=[])
+            log_end(success=False, steps=0, score=0.001, rewards=[])
         return
 
     print("\n" + "=" * 40)

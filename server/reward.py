@@ -84,8 +84,8 @@ class SRERewardConfig:
 # ---------------------------------------------------------------------------
 
 def clamp_score(value: float) -> float:
-    """Clamp a score to [0.0, 1.0], rounded to 3 decimal places."""
-    return round(max(0.0, min(1.0, value)), 3)
+    """Clamp a score to (0, 1), strictly between 0 and 1, rounded to 3 decimal places."""
+    return round(max(0.001, min(0.999, value)), 3)
 
 
 def clamp_reward(value: float) -> float:
