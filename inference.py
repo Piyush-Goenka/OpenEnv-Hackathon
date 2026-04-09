@@ -12,8 +12,9 @@ from models import DevReliabilityAction
 
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:7860")
-MODEL_NAME = os.getenv("MODEL_NAME")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+BENCHMARK = "dev-reliability-env"
 TASK_IDS = tuple(
     task_id.strip()
     for task_id in os.getenv(
@@ -31,7 +32,25 @@ def require_config() -> None:
     if not API_KEY:
         missing.append("HF_TOKEN or API_KEY")
     if missing:
-        raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+        print(f"[WARNING] Missing environment variables: {', '.join(missing)}", flush=True)
+
+
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    print(
+        f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}", flush=True)
 
 
 SYSTEM_PROMPT_CI = """You are an expert CI/CD engineer debugging failing CI pipelines.
@@ -174,43 +193,70 @@ def parse_action(response_text: str, observation) -> DevReliabilityAction:
 
 
 def run_task(task_id: str, llm_client: OpenAI) -> float:
-    with DevReliabilityEnv(base_url=ENV_BASE_URL).sync() as env:
-        result = env.reset(task_id=task_id)
-        # print(f"\n--- {task_id} (max_steps={result.observation.max_steps}) ---")
+    rewards: list[float] = []
+    steps_taken = 0
+    score = 0.0
+    success = False
 
-        messages = [{"role": "system", "content": build_system_prompt(result.observation)}]
+    log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
 
-        for step in range(result.observation.max_steps or 1):
-            if result.done:
-                break
+    try:
+        with DevReliabilityEnv(base_url=ENV_BASE_URL).sync() as env:
+            result = env.reset(task_id=task_id)
 
-            user_msg = build_user_message(task_id, result.observation, step + 1)
-            messages.append({"role": "user", "content": user_msg})
-            # Keep conversation short: system + last 4 turns to save tokens
-            if len(messages) > 9:
-                messages = [messages[0]] + messages[-8:]
+            messages = [{"role": "system", "content": build_system_prompt(result.observation)}]
 
-            try:
-                completion = llm_client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=messages,
-                    max_tokens=512,
-                    temperature=0.0,
-                )
-                response_text = (completion.choices[0].message.content or "").strip()
-            except Exception as e:
-                print(f"           LLM error: {e}")
-                break
-            messages.append({"role": "assistant", "content": response_text})
+            for step in range(1, (result.observation.max_steps or 1) + 1):
+                if result.done:
+                    break
 
-            action = parse_action(response_text, result.observation)
-            # print(f"  step {step+1}: action={action.action_type} payload={json.dumps(action.payload)[:150]}")
-            result = env.step(action)
-            # print(f"           reward={result.reward}  feedback={result.observation.feedback}")
+                user_msg = build_user_message(task_id, result.observation, step)
+                messages.append({"role": "user", "content": user_msg})
+                # Keep conversation short: system + last 4 turns to save tokens
+                if len(messages) > 9:
+                    messages = [messages[0]] + messages[-8:]
 
-        # Use the environment's final_score which is always in [0, 1]
-        state = env.state()
-        return state.final_score if state else 0.0
+                try:
+                    completion = llm_client.chat.completions.create(
+                        model=MODEL_NAME,
+                        messages=messages,
+                        max_tokens=512,
+                        temperature=0.0,
+                    )
+                    response_text = (completion.choices[0].message.content or "").strip()
+                except Exception as e:
+                    log_step(step=step, action="error", reward=0.0, done=True, error=str(e))
+                    rewards.append(0.0)
+                    steps_taken = step
+                    break
+                messages.append({"role": "assistant", "content": response_text})
+
+                action = parse_action(response_text, result.observation)
+                result = env.step(action)
+
+                reward = result.reward or 0.0
+                rewards.append(reward)
+                steps_taken = step
+                action_str = f"{action.action_type}({json.dumps(action.payload)[:80]})"
+                error = result.observation.feedback if "error" in (result.observation.feedback or "").lower() else None
+
+                log_step(step=step, action=action_str, reward=reward, done=result.done, error=error)
+
+                if result.done:
+                    break
+
+            # Use the environment's final_score which is always in [0, 1]
+            state = env.state()
+            score = state.final_score if state else 0.0
+            success = score > 0.0
+
+    except Exception as e:
+        print(f"[DEBUG] Task {task_id} error: {e}", flush=True)
+
+    finally:
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+
+    return score
 
 
 def run_all_tasks(task_ids: Iterable[str]) -> dict[str, float]:
@@ -220,7 +266,16 @@ def run_all_tasks(task_ids: Iterable[str]) -> dict[str, float]:
 
 
 def main() -> None:
-    scores = run_all_tasks(TASK_IDS)
+    try:
+        scores = run_all_tasks(TASK_IDS)
+    except Exception as e:
+        print(f"[DEBUG] Fatal error: {e}", flush=True)
+        # Emit END lines for any tasks that didn't run
+        for task_id in TASK_IDS:
+            log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
+            log_end(success=False, steps=0, score=0.0, rewards=[])
+        return
+
     print("\n" + "=" * 40)
     for task_id, score in scores.items():
         print(f"{task_id}: {score:.3f}")

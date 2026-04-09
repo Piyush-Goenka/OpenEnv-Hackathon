@@ -53,11 +53,11 @@ Model: **GPT-OSS-120B** (`openai/gpt-oss-120b:free`, temperature=0)
 |---|---|---|
 | `ci_easy` | **0.720** | Solved in 2 steps |
 | `ci_medium` | **0.768** | Solved in 2 steps |
-| `ci_hard` | **0.000** | Failed to submit patch |
-| `sre_easy` | **0.381** | Partial diagnosis (2/3 fields correct) |
-| `sre_medium` | **0.215** | Partial diagnosis, wrong remediation |
-| `sre_hard` | **0.200** | Partial diagnosis, wrong remediation |
-| **Average** | **0.381** | |
+| `ci_hard` | **0.136** | Partial fix, hit step limit |
+| `sre_easy` | **0.296** | Partial diagnosis (2/3 fields correct) |
+| `sre_medium` | **0.236** | Partial diagnosis, wrong remediation |
+| `sre_hard` | **0.224** | Partial diagnosis, wrong remediation |
+| **Average** | **0.397** | |
 
 ---
 
@@ -280,7 +280,7 @@ python inference.py
 | Variable | Purpose | Default |
 |---|---|---|
 | `API_BASE_URL` | LLM endpoint | `https://router.huggingface.co/v1` |
-| `MODEL_NAME` | Model identifier | (required) |
+| `MODEL_NAME` | Model identifier | `Qwen/Qwen2.5-72B-Instruct` |
 | `HF_TOKEN` / `API_KEY` | API key | (required) |
 | `ENV_BASE_URL` | Environment server | `http://localhost:7860` |
 | `TASK_IDS` | Comma-separated tasks | all 6 tasks |
